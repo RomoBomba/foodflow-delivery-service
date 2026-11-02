@@ -28,4 +28,15 @@ public class KitchenController {
     public KitchenResponse getMine(Authentication authentication) {
         return service.getMine(authentication.getName());
     }
+
+    @PatchMapping("/me/availability")
+    public KitchenResponse changeAvailability(
+            Authentication authentication,
+            @Valid @RequestBody KitchenAvailabilityRequest request
+    ) {
+        return service.changeAvailability(
+                authentication.getName(),
+                request.acceptingOrders()
+        );
+    }
 }

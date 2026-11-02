@@ -24,4 +24,10 @@ public interface KitchenRepository
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select k from Kitchen k where k.id = :id")
     Optional<Kitchen> findByIdForUpdate(@Param("id") UUID id);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select k from Kitchen k where k.ownerId = :ownerId")
+    Optional<Kitchen> findByOwnerIdForUpdate(
+            @Param("ownerId") UUID ownerId
+    );
 }

@@ -108,4 +108,27 @@ public class Dish {
     public boolean isArchived() { return archived; }
 
     public Instant getCreatedAt() { return createdAt; }
+
+    void updateDetails(
+            Category category,
+            Set<Ingredient> ingredients,
+            DishCreateRequest request
+    ) {
+        this.category = category;
+
+        this.ingredients.clear();
+        this.ingredients.addAll(ingredients);
+
+        this.name = request.name().strip();
+        this.description = request.description().strip();
+        this.price = request.price();
+        this.weightGrams = request.weightGrams();
+        this.kcalPerPortion = request.kcalPerPortion();
+        this.availablePortions = request.availablePortions();
+        this.photoUrl = request.photoUrl();
+    }
+
+    void archive() {
+        this.archived = true;
+    }
 }

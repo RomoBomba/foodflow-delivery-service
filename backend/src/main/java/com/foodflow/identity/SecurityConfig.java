@@ -52,6 +52,10 @@ public class SecurityConfig {
                                 "/api/dishes",
                                 "/api/dishes/**"
                         ).permitAll()
+                        .requestMatchers(
+                                HttpMethod.PATCH,
+                                "/api/kitchens/me/availability"
+                        ).hasRole("KITCHEN")
                         .anyRequest().authenticated()
                 )
                 .sessionManagement(session -> session

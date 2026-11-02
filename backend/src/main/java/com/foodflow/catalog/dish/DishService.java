@@ -1,6 +1,8 @@
 package com.foodflow.catalog.dish;
 
+import com.foodflow.catalog.category.Category;
 import com.foodflow.catalog.category.CategoryRepository;
+import com.foodflow.catalog.ingredient.Ingredient;
 import com.foodflow.catalog.ingredient.IngredientRepository;
 import com.foodflow.catalog.kitchen.Kitchen;
 import com.foodflow.catalog.kitchen.KitchenRepository;
@@ -13,6 +15,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
@@ -39,52 +42,68 @@ public class DishService {
     }
 
     @Transactional
-    public DishResponse create(String email, DishCreateRequest request) {
-        Kitchen ownedKitchen = getOwnedKitchen(email);
-
-        Kitchen kitchen = kitchenRepository
-                .findByIdForUpdate(ownedKitchen.getId())
-                .orElseThrow(() -> new ResponseStatusException(
-                        HttpStatus.NOT_FOUND,
-                        "Кухня не найдена"
-                ));
-
-        if (kitchen.getStatus() != KitchenStatus.APPROVED) {
-            throw new ResponseStatusException(
-                    HttpStatus.CONFLICT,
-                    "Добавлять блюда может только одобренная кухня"
-            );
-        }
-
-        var category = categoryRepository.findById(request.categoryId())
-                .orElseThrow(() -> new ResponseStatusException(
-                        HttpStatus.BAD_REQUEST,
-                        "Категория не найдена"
-                ));
-
-        var ingredients =
-                ingredientRepository.findAllById(request.ingredientIds());
-
-        if (ingredients.size() != request.ingredientIds().size()) {
-            throw new ResponseStatusException(
-                    HttpStatus.BAD_REQUEST,
-                    "Один или несколько ингредиентов не найдены"
-            );
-        }
+    public DishResponse create(
+            String email,
+            DishCreateRequest request
+    ) {
+        Kitchen kitchen = getApprovedKitchenForWrite(email);
+        Category category = getCategory(request.categoryId());
+        Set<Ingredient> ingredients = getIngredients(
+                request.ingredientIds()
+        );
 
         Dish dish = new Dish(
                 kitchen.getId(),
                 category,
-                new HashSet<>(ingredients),
+                ingredients,
                 request
         );
 
         return DishResponse.from(dishRepository.saveAndFlush(dish));
     }
 
+    @Transactional
+    public DishResponse update(
+            String email,
+            UUID dishId,
+            DishCreateRequest request
+    ) {
+        Kitchen kitchen = getApprovedKitchenForWrite(email);
+        Dish dish = getOwnedDishForWrite(dishId, kitchen.getId());
+
+        if (dish.isArchived()) {
+            throw new ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "Архивное блюдо нельзя редактировать"
+            );
+        }
+
+        dish.updateDetails(
+                getCategory(request.categoryId()),
+                getIngredients(request.ingredientIds()),
+                request
+        );
+
+        return DishResponse.from(dish);
+    }
+
+    @Transactional
+    public void archive(String email, UUID dishId) {
+        Kitchen kitchen = getApprovedKitchenForWrite(email);
+        Dish dish = getOwnedDishForWrite(dishId, kitchen.getId());
+
+        dish.archive();
+    }
+
     @Transactional(readOnly = true)
     public List<DishResponse> getMyMenu(String email) {
-        Kitchen kitchen = getOwnedKitchen(email);
+        UUID ownerId = identityQueryService.getUserId(email);
+
+        Kitchen kitchen = kitchenRepository.findByOwnerId(ownerId)
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.NOT_FOUND,
+                        "Кухня пользователя не найдена"
+                ));
 
         return dishRepository
                 .findAllByKitchenIdOrderByCreatedAtDesc(kitchen.getId())
@@ -93,13 +112,58 @@ public class DishService {
                 .toList();
     }
 
-    private Kitchen getOwnedKitchen(String email) {
+    private Kitchen getApprovedKitchenForWrite(String email) {
         UUID ownerId = identityQueryService.getUserId(email);
 
-        return kitchenRepository.findByOwnerId(ownerId)
+        Kitchen kitchen = kitchenRepository
+                .findByOwnerIdForUpdate(ownerId)
                 .orElseThrow(() -> new ResponseStatusException(
                         HttpStatus.NOT_FOUND,
                         "Кухня пользователя не найдена"
                 ));
+
+        if (kitchen.getStatus() != KitchenStatus.APPROVED) {
+            throw new ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "Изменять меню может только одобренная кухня"
+            );
+        }
+
+        return kitchen;
+    }
+
+    private Dish getOwnedDishForWrite(
+            UUID dishId,
+            UUID kitchenId
+    ) {
+        return dishRepository
+                .findOwnedByIdForUpdate(dishId, kitchenId)
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.NOT_FOUND,
+                        "Блюдо не найдено"
+                ));
+    }
+
+    private Category getCategory(UUID categoryId) {
+        return categoryRepository.findById(categoryId)
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.BAD_REQUEST,
+                        "Категория не найдена"
+                ));
+    }
+
+    private Set<Ingredient> getIngredients(Set<UUID> ingredientIds) {
+        var ingredients = ingredientRepository.findAllById(
+                ingredientIds
+        );
+
+        if (ingredients.size() != ingredientIds.size()) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "Один или несколько ингредиентов не найдены"
+            );
+        }
+
+        return new HashSet<>(ingredients);
     }
 }
