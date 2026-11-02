@@ -31,3 +31,15 @@ build/
 
 ### VS Code ###
 .vscode/
+
+# Local environment variables
+.env
+.env.*
+!.env.example
+
+# Frontend
+node_modules/
+dist/
+
+# macOS
+.DS_Store
