@@ -28,6 +28,13 @@ public class SecurityConfig {
                                 "/api/auth/register"
                         ).permitAll()
                         .requestMatchers(
+                                HttpMethod.GET,
+                                "/api/health",
+                                "/api/categories",
+                                "/api/ingredients",
+                                "/api/auth/csrf"
+                        ).permitAll()
+                        .requestMatchers(
                                 HttpMethod.POST,
                                 "/api/kitchens"
                         ).hasRole("CLIENT")
