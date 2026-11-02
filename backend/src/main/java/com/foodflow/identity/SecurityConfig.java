@@ -43,6 +43,10 @@ public class SecurityConfig {
                                 "/api/kitchens/me"
                         ).hasAnyRole("CLIENT", "KITCHEN")
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
+                        .requestMatchers(
+                                "/api/kitchens/me/dishes",
+                                "/api/kitchens/me/dishes/**"
+                        ).hasRole("KITCHEN")
                         .anyRequest().authenticated()
                 )
                 .sessionManagement(session -> session
