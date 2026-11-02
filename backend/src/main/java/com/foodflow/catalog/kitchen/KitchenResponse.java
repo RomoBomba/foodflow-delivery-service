@@ -11,7 +11,9 @@ public record KitchenResponse(
         String deliveryArea,
         KitchenStatus status,
         boolean acceptingOrders,
-        Instant createdAt
+        Instant createdAt,
+        String moderationReason,
+        Instant moderatedAt
 ) {
 
     public static KitchenResponse from(Kitchen kitchen) {
@@ -23,7 +25,9 @@ public record KitchenResponse(
                 kitchen.getDeliveryArea(),
                 kitchen.getStatus(),
                 kitchen.isAcceptingOrders(),
-                kitchen.getCreatedAt()
+                kitchen.getCreatedAt(),
+                kitchen.getModerationReason(),
+                kitchen.getModeratedAt()
         );
     }
 }

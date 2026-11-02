@@ -38,6 +38,15 @@ public class Kitchen {
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
+    @Column(name = "moderation_reason", length = 500)
+    private String moderationReason;
+
+    @Column(name = "moderated_by")
+    private UUID moderatedBy;
+
+    @Column(name = "moderated_at")
+    private Instant moderatedAt;
+
     protected Kitchen() {
     }
 
@@ -88,7 +97,34 @@ public class Kitchen {
         return createdAt;
     }
 
-    void approve() {
+    void approve(UUID moderatorId) {
         this.status = KitchenStatus.APPROVED;
+        recordModeration(moderatorId, null);
+    }
+
+    void reject(UUID moderatorId, String reason) {
+        this.status = KitchenStatus.REJECTED;
+        this.acceptingOrders = false;
+        recordModeration(moderatorId, reason);
+    }
+
+    void block(UUID moderatorId, String reason) {
+        this.status = KitchenStatus.BLOCKED;
+        this.acceptingOrders = false;
+        recordModeration(moderatorId, reason);
+    }
+
+    private void recordModeration(UUID moderatorId, String reason) {
+        this.moderatedBy = moderatorId;
+        this.moderationReason = reason;
+        this.moderatedAt = Instant.now();
+    }
+
+    public String getModerationReason() {
+        return moderationReason;
+    }
+
+    public Instant getModeratedAt() {
+        return moderatedAt;
     }
 }

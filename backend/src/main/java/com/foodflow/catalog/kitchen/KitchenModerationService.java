@@ -32,23 +32,73 @@ public class KitchenModerationService {
     }
 
     @Transactional
-    public KitchenResponse approve(UUID kitchenId) {
-        Kitchen kitchen = repository.findByIdForUpdate(kitchenId)
+    public KitchenResponse approve(
+            UUID kitchenId,
+            String moderatorEmail
+    ) {
+        Kitchen kitchen = getLocked(kitchenId);
+        requireStatus(kitchen, KitchenStatus.PENDING);
+
+        UUID moderatorId =
+                identityQueryService.getUserId(moderatorEmail);
+
+        identityQueryService.grantKitchenRole(kitchen.getOwnerId());
+        kitchen.approve(moderatorId);
+
+        return KitchenResponse.from(kitchen);
+    }
+
+    @Transactional
+    public KitchenResponse reject(
+            UUID kitchenId,
+            String moderatorEmail,
+            String reason
+    ) {
+        Kitchen kitchen = getLocked(kitchenId);
+        requireStatus(kitchen, KitchenStatus.PENDING);
+
+        UUID moderatorId =
+                identityQueryService.getUserId(moderatorEmail);
+
+        kitchen.reject(moderatorId, reason);
+
+        return KitchenResponse.from(kitchen);
+    }
+
+    @Transactional
+    public KitchenResponse block(
+            UUID kitchenId,
+            String moderatorEmail,
+            String reason
+    ) {
+        Kitchen kitchen = getLocked(kitchenId);
+        requireStatus(kitchen, KitchenStatus.APPROVED);
+
+        UUID moderatorId =
+                identityQueryService.getUserId(moderatorEmail);
+
+        kitchen.block(moderatorId, reason);
+
+        return KitchenResponse.from(kitchen);
+    }
+
+    private Kitchen getLocked(UUID kitchenId) {
+        return repository.findByIdForUpdate(kitchenId)
                 .orElseThrow(() -> new ResponseStatusException(
                         HttpStatus.NOT_FOUND,
                         "Кухня не найдена"
                 ));
+    }
 
-        if (kitchen.getStatus() != KitchenStatus.PENDING) {
+    private void requireStatus(
+            Kitchen kitchen,
+            KitchenStatus expected
+    ) {
+        if (kitchen.getStatus() != expected) {
             throw new ResponseStatusException(
                     HttpStatus.CONFLICT,
-                    "Одобрить можно только заявку на проверке"
+                    "Действие недоступно для текущего статуса кухни"
             );
         }
-
-        identityQueryService.grantKitchenRole(kitchen.getOwnerId());
-        kitchen.approve();
-
-        return KitchenResponse.from(kitchen);
     }
 }
