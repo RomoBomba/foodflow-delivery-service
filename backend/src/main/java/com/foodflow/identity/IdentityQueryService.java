@@ -25,4 +25,22 @@ public class IdentityQueryService {
                         "Пользователь не найден"
                 ));
     }
+
+    @Transactional
+    public void grantKitchenRole(UUID userId) {
+        User user = repository.findById(userId)
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.NOT_FOUND,
+                        "Владелец кухни не найден"
+                ));
+
+        if (user.getRole() != UserRole.CLIENT) {
+            throw new ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "Владелец должен иметь роль клиента"
+            );
+        }
+
+        user.grantKitchenRole();
+    }
 }

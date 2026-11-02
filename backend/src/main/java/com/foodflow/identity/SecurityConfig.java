@@ -35,6 +35,7 @@ public class SecurityConfig {
                                 HttpMethod.GET,
                                 "/api/kitchens/me"
                         ).hasAnyRole("CLIENT", "KITCHEN")
+                        .requestMatchers("/api/admin/**").hasRole("ADMIN")
                         .anyRequest().authenticated()
                 )
                 .sessionManagement(session -> session

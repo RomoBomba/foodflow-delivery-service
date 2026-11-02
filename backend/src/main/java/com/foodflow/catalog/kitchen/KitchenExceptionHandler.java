@@ -11,7 +11,10 @@ import org.springframework.web.server.ResponseStatusException;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-@RestControllerAdvice(assignableTypes = KitchenController.class)
+@RestControllerAdvice(assignableTypes = {
+        KitchenController.class,
+        AdminKitchenController.class
+})
 public class KitchenExceptionHandler {
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

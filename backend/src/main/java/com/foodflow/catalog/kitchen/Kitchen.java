@@ -87,4 +87,8 @@ public class Kitchen {
     public Instant getCreatedAt() {
         return createdAt;
     }
+
+    void approve() {
+        this.status = KitchenStatus.APPROVED;
+    }
 }

@@ -51,4 +51,14 @@ public class User {
     public UserRole getRole() {
         return role;
     }
+
+    void grantKitchenRole() {
+        this.role = UserRole.KITCHEN;
+    }
+
+    static User createAdmin(String email, String passwordHash) {
+        User user = new User(email, passwordHash);
+        user.role = UserRole.ADMIN;
+        return user;
+    }
 }
