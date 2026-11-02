@@ -47,6 +47,11 @@ public class SecurityConfig {
                                 "/api/kitchens/me/dishes",
                                 "/api/kitchens/me/dishes/**"
                         ).hasRole("KITCHEN")
+                        .requestMatchers(
+                                HttpMethod.GET,
+                                "/api/dishes",
+                                "/api/dishes/**"
+                        ).permitAll()
                         .anyRequest().authenticated()
                 )
                 .sessionManagement(session -> session
