@@ -127,4 +127,8 @@ public class Kitchen {
     public Instant getModeratedAt() {
         return moderatedAt;
     }
+
+    void setAcceptingOrders(boolean acceptingOrders) {
+        this.acceptingOrders = acceptingOrders;
+    }
 }

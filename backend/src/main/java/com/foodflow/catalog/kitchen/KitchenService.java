@@ -54,4 +54,29 @@ public class KitchenService {
                         "Заявка кухни не найдена"
                 ));
     }
+
+    @Transactional
+    public KitchenResponse changeAvailability(
+            String email,
+            boolean acceptingOrders
+    ) {
+        UUID ownerId = identityQueryService.getUserId(email);
+
+        Kitchen kitchen = repository.findByOwnerIdForUpdate(ownerId)
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.NOT_FOUND,
+                        "Кухня пользователя не найдена"
+                ));
+
+        if (kitchen.getStatus() != KitchenStatus.APPROVED) {
+            throw new ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "Приём заказов доступен только одобренной кухне"
+            );
+        }
+
+        kitchen.setAcceptingOrders(acceptingOrders);
+
+        return KitchenResponse.from(kitchen);
+    }
 }

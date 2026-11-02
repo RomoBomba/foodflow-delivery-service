@@ -28,6 +28,13 @@ public class SecurityConfig {
                                 "/api/auth/register"
                         ).permitAll()
                         .requestMatchers(
+                                HttpMethod.GET,
+                                "/api/health",
+                                "/api/categories",
+                                "/api/ingredients",
+                                "/api/auth/csrf"
+                        ).permitAll()
+                        .requestMatchers(
                                 HttpMethod.POST,
                                 "/api/kitchens"
                         ).hasRole("CLIENT")
@@ -36,6 +43,19 @@ public class SecurityConfig {
                                 "/api/kitchens/me"
                         ).hasAnyRole("CLIENT", "KITCHEN")
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
+                        .requestMatchers(
+                                "/api/kitchens/me/dishes",
+                                "/api/kitchens/me/dishes/**"
+                        ).hasRole("KITCHEN")
+                        .requestMatchers(
+                                HttpMethod.GET,
+                                "/api/dishes",
+                                "/api/dishes/**"
+                        ).permitAll()
+                        .requestMatchers(
+                                HttpMethod.PATCH,
+                                "/api/kitchens/me/availability"
+                        ).hasRole("KITCHEN")
                         .anyRequest().authenticated()
                 )
                 .sessionManagement(session -> session
