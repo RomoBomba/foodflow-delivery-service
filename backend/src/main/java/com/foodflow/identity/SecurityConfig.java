@@ -27,6 +27,14 @@ public class SecurityConfig {
                                 HttpMethod.POST,
                                 "/api/auth/register"
                         ).permitAll()
+                        .requestMatchers(
+                                HttpMethod.POST,
+                                "/api/kitchens"
+                        ).hasRole("CLIENT")
+                        .requestMatchers(
+                                HttpMethod.GET,
+                                "/api/kitchens/me"
+                        ).hasAnyRole("CLIENT", "KITCHEN")
                         .anyRequest().authenticated()
                 )
                 .sessionManagement(session -> session
