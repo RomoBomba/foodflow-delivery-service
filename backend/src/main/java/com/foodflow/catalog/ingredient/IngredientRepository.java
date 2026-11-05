@@ -9,4 +9,6 @@ public interface IngredientRepository
         extends JpaRepository<Ingredient, UUID> {
 
     List<Ingredient> findAllByOrderByNameAsc();
+
+    long countByIdIn(java.util.Collection<UUID> ids);
 }

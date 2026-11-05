@@ -107,6 +107,22 @@ public class Dish {
 
     public boolean isArchived() { return archived; }
 
+    /** Reduce free portions when an order is reserved. Must be called under a row lock. */
+    public void reservePortions(int quantity) {
+        if (quantity < 1 || availablePortions < quantity) {
+            throw new IllegalStateException("Insufficient free portions");
+        }
+        availablePortions -= quantity;
+    }
+
+    /** Return portions only when an order is cancelled before preparation. */
+    public void releasePortions(int quantity) {
+        if (quantity < 1) {
+            throw new IllegalArgumentException("quantity must be positive");
+        }
+        availablePortions = Math.addExact(availablePortions, quantity);
+    }
+
     public Instant getCreatedAt() { return createdAt; }
 
     void updateDetails(

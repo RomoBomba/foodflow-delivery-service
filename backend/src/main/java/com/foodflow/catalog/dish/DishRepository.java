@@ -19,6 +19,13 @@ public interface DishRepository
     @EntityGraph(attributePaths = {"category", "ingredients"})
     List<Dish> findAllByKitchenIdOrderByCreatedAtDesc(UUID kitchenId);
 
+    @EntityGraph(attributePaths = {"category", "ingredients"})
+    List<Dish> findAllByArchivedFalse();
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select d from Dish d where d.id = :id")
+    Optional<Dish> findByIdForUpdate(@Param("id") UUID id);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("""
             select d from Dish d
