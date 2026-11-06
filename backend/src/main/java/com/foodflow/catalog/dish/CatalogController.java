@@ -4,6 +4,7 @@ import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.security.core.Authentication;
 
 import java.math.BigDecimal;
 import java.util.UUID;
@@ -20,6 +21,7 @@ public class CatalogController {
 
     @GetMapping
     public DishPageResponse findAll(
+            Authentication authentication,
             @RequestParam(required = false)
             UUID kitchenId,
 
@@ -56,7 +58,10 @@ public class CatalogController {
                 availableOnly,
                 page,
                 size,
-                sort
+                sort,
+                authentication != null && authentication.getAuthorities().stream()
+                        .anyMatch(authority -> "ROLE_CLIENT".equals(authority.getAuthority()))
+                        ? authentication.getName() : null
         );
     }
 
