@@ -1,4 +1,4 @@
-package com.foodflow.preferences;
+package com.foodflow.recommendation;
 
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;

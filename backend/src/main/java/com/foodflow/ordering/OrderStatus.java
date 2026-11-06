@@ -3,7 +3,7 @@ package com.foodflow.ordering;
 public enum OrderStatus {
     CREATED,
     PREPARING,
-    IN_DELIVERY,
+    DELIVERING,
     COMPLETED,
     CANCELLED
 }

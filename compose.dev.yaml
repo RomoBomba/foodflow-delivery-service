@@ -1,0 +1,14 @@
+# Local HTTP development: no frontend build or TLS certificate required.
+# docker compose -f compose.yaml -f compose.dev.yaml up --build -d
+services:
+  nginx:
+    profiles: [https]
+  backend:
+    environment:
+      SESSION_COOKIE_SECURE: "false"
+      SERVER_FORWARD_HEADERS_STRATEGY: none
+    ports:
+      - "127.0.0.1:8080:8080"
+  postgres:
+    ports:
+      - "127.0.0.1:5433:5432"

@@ -13,8 +13,8 @@ class OrderTransitionsTest {
         return Stream.of(OrderStatus.values()).flatMap(from -> Stream.of(OrderStatus.values())
                 .map(to -> Arguments.of(from, to, switch (from) {
                     case CREATED -> to == OrderStatus.PREPARING || to == OrderStatus.CANCELLED;
-                    case PREPARING -> to == OrderStatus.IN_DELIVERY;
-                    case IN_DELIVERY -> to == OrderStatus.COMPLETED;
+                    case PREPARING -> to == OrderStatus.DELIVERING;
+                    case DELIVERING -> to == OrderStatus.COMPLETED;
                     default -> false;
                 })));
     }

@@ -8,6 +8,7 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -51,8 +52,9 @@ public class CustomerOrder {
     @Column(name = "total_price", nullable = false, precision = 12, scale = 2)
     private BigDecimal totalPrice;
 
-    @Column(name = "reservation_released", nullable = false)
-    private boolean reservationReleased;
+    @Version
+    @Column(nullable = false)
+    private long version;
 
     @Column(name = "cancellation_reason", length = 500)
     private String cancellationReason;
@@ -84,7 +86,6 @@ public class CustomerOrder {
         this.comment = comment;
         this.totalPrice = totalPrice;
         this.status = OrderStatus.CREATED;
-        this.reservationReleased = false;
         this.createdAt = Instant.now();
         this.updatedAt = this.createdAt;
     }
@@ -100,7 +101,7 @@ public class CustomerOrder {
     public String getComment() { return comment; }
     public OrderStatus getStatus() { return status; }
     public BigDecimal getTotalPrice() { return totalPrice; }
-    public boolean isReservationReleased() { return reservationReleased; }
+    public long getVersion() { return version; }
     public String getCancellationReason() { return cancellationReason; }
     public Instant getCreatedAt() { return createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }
@@ -111,10 +112,4 @@ public class CustomerOrder {
         this.updatedAt = Instant.now();
     }
 
-    public void markReservationReleased() {
-        if (reservationReleased) {
-            throw new IllegalStateException("Reservation was already released");
-        }
-        reservationReleased = true;
-    }
 }

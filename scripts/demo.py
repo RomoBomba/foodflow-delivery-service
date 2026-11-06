@@ -4,6 +4,7 @@ import argparse
 import http.cookiejar
 import json
 import os
+import ssl
 import sys
 import urllib.error
 import urllib.parse
@@ -20,7 +21,9 @@ class ApiError(Exception):
 class Api:
     def __init__(self, base):
         self.base = base.rstrip("/")
+        context = ssl.create_default_context(cafile=os.environ.get("FOODFLOW_CA_FILE"))
         self.opener = urllib.request.build_opener(
+            urllib.request.HTTPSHandler(context=context),
             urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
         self.csrf = None
         self.csrf_header = None
@@ -117,8 +120,9 @@ def seed(base, admin_email, admin_password, demo_password, smoke):
     repeated = client.call("POST", "/api/orders", body, headers={"Idempotency-Key": key})
     if repeated["id"] != order["id"]:
         raise RuntimeError("Повтор оформления создал другой заказ")
-    for status in ("PREPARING", "IN_DELIVERY", "COMPLETED"):
-        first_kitchen.call("PATCH", f"/api/kitchens/me/orders/{order['id']}/status", {"status": status})
+    for status in ("PREPARING", "DELIVERING", "COMPLETED"):
+        order = first_kitchen.call("PATCH", f"/api/kitchens/me/orders/{order['id']}/status",
+                                   {"status": status, "expectedVersion": order["version"]})
     review = client.call("POST", f"/api/orders/{order['id']}/reviews", {
         "items": [{"orderItemId": order["items"][0]["id"], "rating": 5, "reordered": True, "text": "Демонстрационный отзыв"}]})
     visible = client.call("GET", f"/api/dishes/{first_dish['id']}/reviews")

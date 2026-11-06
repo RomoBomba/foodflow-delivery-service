@@ -5,7 +5,7 @@ public final class OrderTransitions {
 
     public static boolean isAllowed(OrderStatus from, OrderStatus to) {
         return (from == OrderStatus.CREATED && (to == OrderStatus.PREPARING || to == OrderStatus.CANCELLED))
-                || (from == OrderStatus.PREPARING && to == OrderStatus.IN_DELIVERY)
-                || (from == OrderStatus.IN_DELIVERY && to == OrderStatus.COMPLETED);
+                || (from == OrderStatus.PREPARING && to == OrderStatus.DELIVERING)
+                || (from == OrderStatus.DELIVERING && to == OrderStatus.COMPLETED);
     }
 }
