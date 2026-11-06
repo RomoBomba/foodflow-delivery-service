@@ -45,8 +45,17 @@ public class RecommendationService {
 
     @Transactional(readOnly = true)
     public RecommendationResponse recommend(String email, int page, int size) {
+        return recommend(email, page, size, null);
+    }
+
+    @Transactional(readOnly = true)
+    public RecommendationResponse recommend(String email, int page, int size, Set<UUID> dishIds) {
         validatePage(page, size);
         Ranking ranking = rank(email, null, null, null, null, false);
+        if (dishIds != null) {
+            ranking = new Ranking(ranking.scoringEnabled(), ranking.dishes().stream()
+                    .filter(item -> dishIds.contains(item.dish().id())).toList());
+        }
         int from = pageStart(page, size, ranking.dishes().size());
         int to = Math.min(from + size, ranking.dishes().size());
         return new RecommendationResponse(

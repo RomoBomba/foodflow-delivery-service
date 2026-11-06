@@ -57,9 +57,6 @@ export function Layout() {
         <Link to={user?.role === 'KITCHEN' ? '/kitchen' : user?.role === 'ADMIN' ? '/admin' : '/'} className="logo" aria-label="FoodFlow — на главную">
           <i aria-hidden="true">F</i>FoodFlow
         </Link>
-        {user && user.role !== 'CLIENT' && (
-          <span className="role">{user.role === 'KITCHEN' ? 'кухня' : 'админ'}</span>
-        )}
         <nav className="nav" id="main-nav" aria-label="Основное меню">
           {nav.map((item) => (
             <NavLink key={item.to + item.label} to={item.to} end={item.end}>
@@ -83,7 +80,6 @@ export function Layout() {
             <div className="user">
               <div className="avatar" aria-hidden="true">{user.email.charAt(0)}</div>
               <span className="email">{user.email}</span>
-              <span className="role">{user.role}</span>
               <button type="button" className="btn sm" onClick={onLogout}>Выйти</button>
             </div>
           ) : (

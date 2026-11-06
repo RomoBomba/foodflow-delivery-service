@@ -866,4 +866,40 @@ class BackendApplicationTests {
         assertThat(reviewQueries.summary(dishId).reviewCount()).isZero();
     }
 
+    @Test
+    void visiblePageCanRequestScoresOutsideFirstHundredRecommendations() throws Exception {
+        preferences.update(CLIENT, new PreferenceRequest(Set.of(categoryId), Set.of(), Set.of(), null, null));
+        for (int i = 0; i < 100; i++) dish(1);
+        var last = recommendations.recommend(CLIENT, 1, 100).content().getLast().dish().id();
+        mvc.perform(get("/api/recommendations").param("dishIds", last.toString())
+                        .with(user(CLIENT).roles("CLIENT")))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content[0].dish.id").value(last.toString()))
+                .andExpect(jsonPath("$.content[0].score").value(100));
+        preferences.update(CLIENT, new PreferenceRequest(Set.of(categoryId), Set.of(), Set.of(ingredientId), null, null));
+        mvc.perform(get("/api/recommendations").param("dishIds", last.toString())
+                        .with(user(CLIENT).roles("CLIENT")))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.content.length()").value(0));
+        String tooMany = java.util.stream.IntStream.range(0, 101).mapToObj(i -> UUID.randomUUID().toString())
+                .collect(java.util.stream.Collectors.joining(","));
+        mvc.perform(get("/api/recommendations").param("dishIds", tooMany)
+                        .with(user(CLIENT).roles("CLIENT"))).andExpect(status().isBadRequest());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"0000000000", "+7 (777) 777-77-77"})
+    void repeatedDigitPhoneIsRejectedWithoutCreatingOrder(String phone) throws Exception {
+        carts.add(CLIENT, new CartItemRequest(dishId, 1, false));
+        mvc.perform(post("/api/orders").with(user(CLIENT).roles("CLIENT")).with(csrf())
+                        .header("Idempotency-Key", "invalid-phone-key").contentType("application/json")
+                        .content("""
+                                {"deliveryAddress":"Учебная улица, дом 10", "phone":"%s",
+                                 "items":[{"dishId":"%s","quantity":1}]}
+                                """.formatted(phone, dishId)))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("INVALID_PHONE"));
+        assertThat(count("orders")).isZero();
+        assertThat(count("reservations")).isZero();
+        assertThat(carts.get(CLIENT).items()).hasSize(1);
+    }
+
 }

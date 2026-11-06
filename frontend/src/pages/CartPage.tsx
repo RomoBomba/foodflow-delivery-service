@@ -78,9 +78,24 @@ export function CartPage() {
     return key;
   };
 
+  const [touched, setTouched] = useState<Partial<Record<keyof Draft, boolean>>>({});
+  const validateField = (field: keyof Draft, value: string) => field === 'deliveryAddress'
+    ? validateAddress(value) : field === 'phone' ? validatePhone(value) : validateOptional(value, 500);
+  const showFieldError = (field: keyof Draft, value: string) => {
+    const message = validateField(field, value);
+    setErrors((previous) => {
+      const next = { ...previous };
+      if (message) next[field] = message; else delete next[field];
+      return next;
+    });
+  };
+  const blur = (field: keyof Draft) => {
+    setTouched((previous) => ({ ...previous, [field]: true }));
+    showFieldError(field, draft[field]);
+  };
   const update = (field: keyof Draft, value: string) => {
     setDraft({ ...draft, [field]: value });
-    if (errors[field]) setErrors(({ [field]: _removed, ...rest }) => rest);
+    if (touched[field] || errors[field]) showFieldError(field, value);
   };
 
   const validate = (): FieldErrors => {
@@ -158,7 +173,7 @@ export function CartPage() {
     event.preventDefault();
     const fieldErrors = validate();
     setErrors(fieldErrors);
-    if (hasErrors(fieldErrors) || blocked.length > 0 || items.length === 0) return;
+    if (submitting || attempt.unknownBody || hasErrors(fieldErrors) || blocked.length > 0 || items.length === 0) return;
     const body: OrderCreateRequest = {
       deliveryAddress: draft.deliveryAddress.trim(),
       phone: draft.phone.trim(),
@@ -320,6 +335,7 @@ export function CartPage() {
               {...describe('address', errors.deliveryAddress, true)}
               value={draft.deliveryAddress}
               onChange={(e) => update('deliveryAddress', e.target.value)}
+              onBlur={() => blur('deliveryAddress')}
             />
           </Field>
           <Field id="phone" label="Телефон *" error={errors.phone} hint="от 10 до 15 цифр, например +7 (999) 123-45-67">
@@ -331,6 +347,7 @@ export function CartPage() {
               {...describe('phone', errors.phone, true)}
               value={draft.phone}
               onChange={(e) => update('phone', e.target.value)}
+              onBlur={() => blur('phone')}
             />
           </Field>
           <Field id="comment" label="Комментарий для кухни" error={errors.comment} hint={`необязательно · ${draft.comment.length} / 500`}>
@@ -341,6 +358,7 @@ export function CartPage() {
               {...describe('comment', errors.comment, true)}
               value={draft.comment}
               onChange={(e) => update('comment', e.target.value)}
+              onBlur={() => blur('comment')}
             />
           </Field>
           <div className="pay">

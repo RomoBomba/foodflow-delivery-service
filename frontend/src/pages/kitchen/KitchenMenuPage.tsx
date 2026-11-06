@@ -1,3 +1,4 @@
+import { Select } from '../../components/Select';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { ApiError, errorText } from '../../api/client';
 import { kitchenApi } from '../../api/endpoints';
@@ -260,10 +261,8 @@ function DishEditor({
       </Field>
       <div className="two">
         <Field id="d-category" label="Категория *" error={errors.categoryId}>
-          <select className="input" {...describe('d-category', errors.categoryId)} value={form.categoryId} onChange={(e) => set('categoryId', e.target.value)}>
-            <option value="">Выберите…</option>
-            {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
+          <Select {...describe('d-category', errors.categoryId)} value={form.categoryId} onChange={(value) => set('categoryId', value)}
+            options={[{ value: '', label: 'Выберите…' }, ...categories.map((item) => ({ value: item.id, label: item.name }))]} />
         </Field>
         <Field id="d-price" label="Цена, ₽ *" error={errors.price}>
           <input className="input" inputMode="decimal" {...describe('d-price', errors.price)} value={form.price} onChange={(e) => set('price', e.target.value)} />

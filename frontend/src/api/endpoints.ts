@@ -49,8 +49,8 @@ export const catalogApi = {
 export const preferencesApi = {
   get: () => api<Preferences>('/api/preferences'),
   save: (request: PreferencesRequest) => api<Preferences>('/api/preferences', { method: 'PUT', json: request }),
-  recommendations: (page = 0, size = 100) =>
-    api<RecommendationPage>('/api/recommendations', { query: { page, size } }),
+  recommendations: (page = 0, size = 100, dishIds?: UUID[]) =>
+    api<RecommendationPage>('/api/recommendations', { query: { page, size, dishIds: dishIds?.join(',') } }),
   compatibility: (dishId: UUID) =>
     api<Compatibility>(`/api/recommendations/dishes/${id(dishId)}/compatibility`),
 };

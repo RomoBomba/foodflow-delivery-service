@@ -94,7 +94,7 @@ export function RefreshInfo({ seconds, failed, onRefresh, loading }: { seconds: 
     <div className="refresh" aria-live="polite">
       <span className={`dot${failed ? ' off' : ''}`} aria-hidden="true" />
       <span>
-        {seconds === null ? 'Обновляем…' : `Обновлено ${seconds} с назад`} · автообновление каждые 15 с
+        {seconds === null ? 'Обновляем…' : `Обновлено ${seconds} с назад`}
       </span>
       <button type="button" className="btn sm" onClick={onRefresh} disabled={loading}>↻ Обновить</button>
     </div>

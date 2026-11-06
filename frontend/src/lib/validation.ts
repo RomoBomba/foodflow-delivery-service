@@ -34,9 +34,10 @@ export function validatePhone(value: string): string | null {
   const phone = value.trim();
   if (!phone) return 'Введите телефон';
   if (phone.length > 25) return 'Не длиннее 25 символов';
-  if (!/^[0-9+()\s-]+$/.test(phone)) return 'Допустимы цифры, пробел и символы + ( ) -';
+  if (!/^[0-9+() -]+$/.test(phone)) return 'Допустимы цифры, пробел и символы + ( ) -';
   const digits = phone.replace(/\D/g, '').length;
   if (digits < 10 || digits > 15) return 'Введите от 10 до 15 цифр';
+  if (/^(\d)\1+$/.test(phone.replace(/\D/g, ''))) return 'Номер не может состоять из одной повторяющейся цифры';
   return null;
 }
 

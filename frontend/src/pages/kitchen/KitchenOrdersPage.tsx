@@ -54,7 +54,8 @@ export function KitchenOrdersPage() {
   const list = orders.data ?? [];
   const today = new Date().toDateString();
   const todayOrders = list.filter((o) => new Date(o.createdAt).toDateString() === today);
-  const revenue = todayOrders.filter((o) => o.status === 'COMPLETED').reduce((s, o) => s + o.totalPrice, 0);
+  const revenue = list.filter((o) => o.status === 'COMPLETED' && o.history.some((entry) =>
+    entry.toStatus === 'COMPLETED' && new Date(entry.createdAt).toDateString() === today)).reduce((s, o) => s + o.totalPrice, 0);
 
   return (
     <>
@@ -70,7 +71,7 @@ export function KitchenOrdersPage() {
           </div>
           <div className="panel" style={{ padding: '8px 14px' }}>
             <b style={{ fontSize: 18 }}>{formatMoney(revenue)}</b>
-            <div className="small muted">выполнено сегодня</div>
+            <div className="small muted">заработано сегодня</div>
           </div>
           {kitchen.data && <AcceptingSwitch kitchen={kitchen.data} onChange={(k) => kitchen.setData(k)} />}
         </div>

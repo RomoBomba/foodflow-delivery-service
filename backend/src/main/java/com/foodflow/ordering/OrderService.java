@@ -253,6 +253,9 @@ public class OrderService {
         if (phone == null || digits < 10 || digits > 15 || !phone.matches("[0-9+() -]+")) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "INVALID_PHONE", "Телефон должен содержать от 10 до 15 цифр");
         }
+        if (normalizePhone(phone).chars().distinct().count() == 1) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "INVALID_PHONE", "Номер не может состоять из одной повторяющейся цифры");
+        }
     }
 
     private void validateAddress(String address) {

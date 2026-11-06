@@ -1,3 +1,4 @@
+import { Select } from '../components/Select';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { catalogApi, preferencesApi } from '../api/endpoints';
@@ -46,11 +47,11 @@ export function CatalogPage() {
 
   const catalog = useAsync(() => catalogApi.dishes(query), [JSON.stringify(query), checking]);
 
-  // Балл соответствия есть только в /api/recommendations; каталог с sort=relevance
-  // отдаёт порядок, но не сами баллы.
+  // Request scores for the visible page, including dishes outside the top 100.
+  const dishIds = catalog.data?.content.map((dish) => dish.id) ?? [];
   const reco = useAsync<RecommendationPage | null>(
-    () => (isClient ? preferencesApi.recommendations(0, 100) : Promise.resolve(null)),
-    [isClient, user?.id],
+    () => (isClient && dishIds.length > 0 ? preferencesApi.recommendations(0, PAGE_SIZE, dishIds) : Promise.resolve(null)),
+    [isClient, user?.id, dishIds.join(',')],
   );
   const prefs = useAsync(() => (isClient ? preferencesApi.get() : Promise.resolve(null)), [isClient, user?.id]);
 
@@ -121,17 +122,13 @@ export function CatalogPage() {
           {catalog.data ? `Найдено ${countLabel(catalog.data.totalElements, ['блюдо', 'блюда', 'блюд'])}` : ''}
         </span>
         <label className="small muted" htmlFor="sort">Сортировка</label>
-        <select
-          id="sort"
-          className="input"
-          style={{ width: 'auto', minWidth: 200 }}
-          value={query.sort}
-          onChange={(event) => update({ sort: event.target.value })}
-        >
-          {isClient && <option value="relevance">По соответствию</option>}
-          <option value="priceAsc">Сначала дешевле</option>
-          <option value="priceDesc">Сначала дороже</option>
-        </select>
+        <Select id="sort" className="sort-select" value={query.sort ?? 'priceAsc'}
+          onChange={(value) => update({ sort: value })}
+          options={[
+            ...(isClient ? [{ value: 'relevance', label: 'По соответствию' }] : []),
+            { value: 'priceAsc', label: 'Сначала дешевле' },
+            { value: 'priceDesc', label: 'Сначала дороже' },
+          ]} />
       </div>
 
       <div className="with-side">
@@ -149,6 +146,7 @@ export function CatalogPage() {
 
         <section aria-label="Блюда">
           <ErrorAlert error={catalog.error} onRetry={catalog.reload} />
+          <ErrorAlert error={reco.error} onRetry={reco.reload} />
           {catalog.loading && !catalog.data && <Loading />}
           {catalog.data && catalog.data.content.length === 0 && (
             <Empty title="Ничего не нашлось">
@@ -166,6 +164,7 @@ export function CatalogPage() {
                   key={dish.id}
                   dish={dish}
                   score={isClient && scoringEnabled ? scores.get(dish.id) : undefined}
+                  excludedIngredients={dish.ingredients.filter((ingredient) => prefs.data?.excludedIngredientIds.includes(ingredient.id)).map((ingredient) => ingredient.name)}
                   busy={busyId === dish.id}
                   onAdd={() => void add(dish)}
                 />
@@ -276,20 +275,12 @@ function Filters({
   return (
     <form className="panel filters" id="catalog-filters" data-open={open} onSubmit={submit} aria-label="Фильтры каталога">
       <h3><label htmlFor="f-kitchen">Кухня</label></h3>
-      <select id="f-kitchen" className="input" value={kitchenId} onChange={(e) => setKitchenId(e.target.value)}>
-        <option value="">Все кухни</option>
-        {kitchens.map((k) => (
-          <option key={k.id} value={k.id}>{k.name}</option>
-        ))}
-      </select>
+      <Select id="f-kitchen" value={kitchenId} onChange={setKitchenId}
+        options={[{ value: '', label: 'Все кухни' }, ...kitchens.map((item) => ({ value: item.id, label: item.name }))]} />
 
       <h3><label htmlFor="f-category">Категория</label></h3>
-      <select id="f-category" className="input" value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
-        <option value="">Все категории</option>
-        {categories.map((c) => (
-          <option key={c.id} value={c.id}>{c.name}</option>
-        ))}
-      </select>
+      <Select id="f-category" value={categoryId} onChange={setCategoryId}
+        options={[{ value: '', label: 'Все категории' }, ...categories.map((item) => ({ value: item.id, label: item.name }))]} />
 
       <h3>Цена, ₽</h3>
       <div className="price-range">
@@ -318,14 +309,15 @@ function Filters({
   );
 }
 
-function DishCard({ dish, score, busy, onAdd }: { dish: CatalogDish; score?: number; busy: boolean; onAdd: () => void }) {
+function DishCard({ dish, score, excludedIngredients, busy, onAdd }: { dish: CatalogDish; score?: number; excludedIngredients: string[]; busy: boolean; onAdd: () => void }) {
+  const excluded = excludedIngredients.length > 0;
   return (
     <article className={`card${dish.available ? '' : ' off'}`}>
       <DishPhoto
         url={dish.photoUrl}
         name={dish.name}
         label={
-          score !== undefined ? (
+          excluded ? <span className="score incompatible" title="Содержит исключённый вами ингредиент">Не подходит</span> : score !== undefined ? (
             <span className="score" title="Соответствие вашему профилю, 0–100">
               {score}<span className="word"> · соответствие</span>
             </span>
@@ -333,7 +325,7 @@ function DishCard({ dish, score, busy, onAdd }: { dish: CatalogDish; score?: num
         }
       />
       <div className="body">
-        <h3><Link to={`/dishes/${dish.id}`}>{dish.name}</Link></h3>
+        <h3><Link className="card-link" to={`/dishes/${dish.id}`}>{dish.name}</Link></h3>
         <div className="kitchen">{dish.kitchenName}</div>
         <div className="facts">
           {dish.weightGrams} г · {dish.kcalPerPortion} ккал ·{' '}
@@ -343,10 +335,11 @@ function DishCard({ dish, score, busy, onAdd }: { dish: CatalogDish; score?: num
             <span className="out">{dish.availablePortions === 0 ? 'нет в наличии' : 'кухня не принимает заказы'}</span>
           )}
         </div>
+        {excluded && <p className="tiny out">Исключено в предпочтениях: {excludedIngredients.join(', ')}</p>}
         <RatingLine {...dish} />
         <div className="foot">
           <span className="price">{formatMoney(dish.price)}</span>
-          <BuyButton dish={dish} busy={busy} onAdd={onAdd} />
+          <div className="card-action"><BuyButton dish={dish} busy={busy} onAdd={onAdd} blockedReason={excluded ? "Содержит исключённый вами ингредиент" : null} /></div>
         </div>
       </div>
     </article>

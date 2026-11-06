@@ -6,6 +6,8 @@ import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.UUID;
+import java.util.Set;
+import jakarta.validation.constraints.Size;
 
 @RestController
 @RequestMapping("/api/recommendations")
@@ -18,9 +20,10 @@ public class RecommendationController {
     public RecommendationResponse get(
             Authentication authentication,
             @RequestParam(defaultValue = "0") @Min(0) int page,
-            @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size
+            @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size,
+            @RequestParam(required = false) @Size(max = 100) Set<UUID> dishIds
     ) {
-        return service.recommend(authentication.getName(), page, size);
+        return service.recommend(authentication.getName(), page, size, dishIds);
     }
 
     @GetMapping("/dishes/{dishId}/compatibility")

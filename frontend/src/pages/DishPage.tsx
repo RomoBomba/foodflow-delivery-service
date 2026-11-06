@@ -29,7 +29,7 @@ export function DishPage() {
     const [prefs, compatibility, reco] = await Promise.all([
       preferencesApi.get(),
       preferencesApi.compatibility(dishId),
-      preferencesApi.recommendations(0, 100),
+      preferencesApi.recommendations(0, 1, [dishId]),
     ]);
     return {
       prefs,
