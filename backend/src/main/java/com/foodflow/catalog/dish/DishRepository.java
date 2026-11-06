@@ -22,6 +22,10 @@ public interface DishRepository
     @EntityGraph(attributePaths = {"category", "ingredients"})
     List<Dish> findAllByArchivedFalse();
 
+    // A scalar lookup must not populate the persistence context before the row lock.
+    @Query("select d.kitchenId from Dish d where d.id = :id")
+    Optional<UUID> findKitchenIdById(@Param("id") UUID id);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select d from Dish d where d.id = :id")
     Optional<Dish> findByIdForUpdate(@Param("id") UUID id);

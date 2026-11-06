@@ -9,5 +9,9 @@ import java.util.UUID;
 public record CartItemRequest(
         @NotNull UUID dishId,
         @Min(1) @Max(99) int quantity,
-        boolean confirmReplaceKitchen
-) { }
+        Boolean confirmReplaceKitchen
+) {
+    public CartItemRequest {
+        confirmReplaceKitchen = Boolean.TRUE.equals(confirmReplaceKitchen);
+    }
+}

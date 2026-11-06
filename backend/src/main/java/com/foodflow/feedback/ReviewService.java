@@ -52,7 +52,7 @@ public class ReviewService {
     @Transactional
     public List<ReviewResponse> create(String email, UUID orderId, OrderReviewRequest request) {
         UUID userId = identityQueryService.getUserId(email);
-        CustomerOrder order = orderRepository.findByIdAndCustomerId(orderId, userId)
+        CustomerOrder order = orderRepository.findByIdAndCustomerForUpdate(orderId, userId)
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "ORDER_NOT_FOUND", "Заказ не найден"));
         if (order.getStatus() != OrderStatus.COMPLETED) {
             throw new ApiException(HttpStatus.CONFLICT, "ORDER_NOT_COMPLETED", "Оставить отзыв можно только по выполненному заказу");
@@ -113,7 +113,7 @@ public class ReviewService {
     @Transactional
     public ReviewResponse hide(String email, UUID reviewId, String reason) {
         UUID moderatorId = identityQueryService.getUserId(email);
-        Review review = reviewRepository.findById(reviewId)
+        Review review = reviewRepository.findByIdForUpdate(reviewId)
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "REVIEW_NOT_FOUND", "Отзыв не найден"));
         if (!review.isVisible()) {
             throw new ApiException(HttpStatus.CONFLICT, "REVIEW_ALREADY_HIDDEN", "Отзыв уже скрыт");

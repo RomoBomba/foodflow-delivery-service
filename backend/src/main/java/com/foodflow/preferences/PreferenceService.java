@@ -68,6 +68,7 @@ public class PreferenceService {
             throw new ApiException(HttpStatus.BAD_REQUEST, "UNKNOWN_INGREDIENT", "Один или несколько ингредиентов не найдены");
         }
 
+        cartService.lockForPreferenceUpdate(userId);
         Preference preference = repository.findById(userId).orElseGet(() -> new Preference(userId));
         preference.update(
                 request.favoriteCategoryIds(),

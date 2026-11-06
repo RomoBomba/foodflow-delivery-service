@@ -14,6 +14,10 @@ public record OrderCreateRequest(
         @NotBlank @Size(max = 25) String phone,
         @Size(max = 500) String comment,
         @NotEmpty @Size(max = 30) List<@NotNull @Valid OrderLineRequest> items,
-        boolean acceptCurrentPrices,
+        Boolean acceptCurrentPrices,
         @Pattern(regexp = "[a-f0-9]{64}") String confirmedPriceFingerprint
-) { }
+) {
+    public OrderCreateRequest {
+        acceptCurrentPrices = Boolean.TRUE.equals(acceptCurrentPrices);
+    }
+}

@@ -95,6 +95,10 @@ public class RecommendationService {
         UUID userId = identityQueryService.getUserId(email);
         Dish dish = dishRepository.findById(dishId)
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "DISH_NOT_FOUND", "Блюдо не найдено"));
+        Kitchen kitchen = kitchenRepository.findById(dish.getKitchenId()).orElse(null);
+        if (dish.isArchived() || kitchen == null || kitchen.getStatus() != KitchenStatus.APPROVED) {
+            throw new ApiException(HttpStatus.NOT_FOUND, "DISH_NOT_FOUND", "Блюдо не найдено");
+        }
         Preference preference = preferenceRepository.findById(userId).orElse(null);
         if (preference == null) return new DishCompatibilityResponse(dishId, true, null, null);
         for (Ingredient ingredient : dish.getIngredients()) {
@@ -179,7 +183,8 @@ public class RecommendationService {
 
     private Score calculate(Dish dish, Preference preference) {
         Boolean categoryMatch = null;
-        Double favoriteShare = null;
+        int ingredientMatches = 0;
+        int ingredientCount = 0;
         Boolean kcalMatch = null;
         List<String> explanation = new ArrayList<>();
 
@@ -192,7 +197,8 @@ public class RecommendationService {
                     .map(Ingredient::getId).collect(Collectors.toSet());
             long matches = preference.getFavoriteIngredientIds().stream()
                     .filter(dishIngredients::contains).count();
-            favoriteShare = (double) matches / preference.getFavoriteIngredientIds().size();
+            ingredientMatches = Math.toIntExact(matches);
+            ingredientCount = preference.getFavoriteIngredientIds().size();
             explanation.add("Любимые ингредиенты: " + matches + " из " + preference.getFavoriteIngredientIds().size());
         }
         if (preference.getKcalMin() != null || preference.getKcalMax() != null) {
@@ -200,7 +206,7 @@ public class RecommendationService {
                     && (preference.getKcalMax() == null || dish.getKcalPerPortion() <= preference.getKcalMax());
             explanation.add("Калорийность: " + (kcalMatch ? "в заданном диапазоне" : "вне диапазона"));
         }
-        return new Score(RecommendationScorer.calculate(categoryMatch, favoriteShare, kcalMatch), explanation);
+        return new Score(RecommendationScorer.calculate(categoryMatch, ingredientMatches, ingredientCount, kcalMatch), explanation);
     }
 
     private record Score(Integer value, List<String> explanation) { }

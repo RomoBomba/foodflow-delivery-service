@@ -72,15 +72,15 @@ public class OrderService {
         CustomerOrder existing = orderRepository
                 .findByCustomerIdAndIdempotencyKey(customerId, idempotencyKey)
                 .orElse(null);
-        if (existing != null) return idempotentResult(existing, fingerprint);
+        if (existing != null) return idempotentResult(existing, fingerprint, request);
 
         Cart cart = cartRepository.findByUserIdForUpdate(customerId)
                 .orElseThrow(() -> new ApiException(HttpStatus.CONFLICT, "CART_EMPTY", "Корзина пуста"));
+        // The first lookup may predate a concurrent checkout, even if the cart was refilled.
+        existing = orderRepository.findByCustomerIdAndIdempotencyKey(customerId, idempotencyKey).orElse(null);
+        if (existing != null) return idempotentResult(existing, fingerprint, request);
         List<CartItem> cartItems = cartItemRepository.findAllByCartIdOrderByDishIdAsc(cart.getId());
         if (cartItems.isEmpty()) {
-            // A concurrent retry may have completed while this request waited for the cart lock.
-            existing = orderRepository.findByCustomerIdAndIdempotencyKey(customerId, idempotencyKey).orElse(null);
-            if (existing != null) return idempotentResult(existing, fingerprint);
             throw new ApiException(HttpStatus.CONFLICT, "CART_EMPTY", "Корзина пуста");
         }
         if (cart.getKitchenId() == null) {
@@ -288,12 +288,17 @@ public class OrderService {
                 .sorted(Comparator.comparing(line -> line.dishId().toString()))
                 .map(line -> line.dishId() + ":" + line.quantity())
                 .collect(Collectors.joining("|"));
-        String raw = request.deliveryAddress().strip() + "\n" + normalizePhone(request.phone()) + "\n"
-                + (request.comment() == null ? "" : request.comment().strip()) + "\n"
-                + request.acceptCurrentPrices() + "\n"
-                + (request.confirmedPriceFingerprint() == null ? "" : request.confirmedPriceFingerprint())
-                + "\n" + lines;
+        String raw = encodeField(request.deliveryAddress().strip())
+                + encodeField(normalizePhone(request.phone()))
+                + encodeField(request.comment() == null ? "" : request.comment().strip())
+                + encodeField(Boolean.toString(request.acceptCurrentPrices()))
+                + encodeField(request.confirmedPriceFingerprint() == null ? "" : request.confirmedPriceFingerprint())
+                + encodeField(lines);
         return sha256(raw);
+    }
+
+    private String encodeField(String value) {
+        return value.length() + ":" + value;
     }
 
     private String priceFingerprint(List<Dish> dishes, Map<UUID, CartItem> cartItems) {
@@ -314,11 +319,37 @@ public class OrderService {
         }
     }
 
-    private OrderResponse idempotentResult(CustomerOrder existing, String fingerprint) {
-        if (!existing.getRequestFingerprint().equals(fingerprint)) {
+    private OrderResponse idempotentResult(CustomerOrder existing, String fingerprint, OrderCreateRequest request) {
+        if (!existing.getRequestFingerprint().equals(fingerprint)
+                && !matchesLegacyRequest(existing, request)) {
             throw new ApiException(HttpStatus.CONFLICT, "IDEMPOTENCY_KEY_REUSED", "Этот ключ уже использован с другим содержимым заказа");
         }
         return toResponse(existing);
+    }
+
+    private boolean matchesLegacyRequest(CustomerOrder order, OrderCreateRequest request) {
+        // Preserve retries for orders created before length-prefixed fingerprints.
+        // The old hash alone is ambiguous; compare persisted details and line snapshots too.
+        String comment = request.comment() == null ? "" : request.comment().strip();
+        if (!order.getDeliveryAddress().equals(request.deliveryAddress().strip())
+                || !order.getPhone().equals(normalizePhone(request.phone()))
+                || !(order.getComment() == null ? "" : order.getComment()).equals(comment)) {
+            return false;
+        }
+        String lines = request.items().stream()
+                .sorted(Comparator.comparing(line -> line.dishId().toString()))
+                .map(line -> line.dishId() + ":" + line.quantity())
+                .collect(Collectors.joining("|"));
+        String savedLines = orderItemRepository.findAllByOrderIdOrderByDishIdAsc(order.getId()).stream()
+                .sorted(Comparator.comparing(item -> item.getDishId().toString()))
+                .map(item -> item.getDishId() + ":" + item.getQuantity())
+                .collect(Collectors.joining("|"));
+        if (!lines.equals(savedLines)) return false;
+        String legacy = request.deliveryAddress().strip() + "\n" + normalizePhone(request.phone()) + "\n"
+                + comment + "\n" + request.acceptCurrentPrices() + "\n"
+                + (request.confirmedPriceFingerprint() == null ? "" : request.confirmedPriceFingerprint())
+                + "\n" + lines;
+        return order.getRequestFingerprint().equals(sha256(legacy));
     }
 
     private OrderResponse toResponse(CustomerOrder order) {

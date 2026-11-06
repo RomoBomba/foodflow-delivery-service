@@ -78,8 +78,15 @@ public class CatalogService {
                     "Допустимая сортировка каталога: priceAsc, priceDesc или relevance");
         };
 
+        var specification = publicDishes(kitchenId, categoryId, minPrice, maxPrice, availableOnly);
+        // JPA offsets are ints, although Spring's PageRequest computes a long offset.
+        if ((long) page * size > Integer.MAX_VALUE) {
+            long total = dishRepository.count(specification);
+            return new DishPageResponse(java.util.List.of(), page, size, total,
+                    (int) Math.min(Integer.MAX_VALUE, (total + size - 1) / size));
+        }
         var result = dishRepository.findAll(
-                publicDishes(kitchenId, categoryId, minPrice, maxPrice, availableOnly),
+                specification,
                 PageRequest.of(page, size, ordering)
         );
 

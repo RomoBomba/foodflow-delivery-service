@@ -59,19 +59,10 @@ public class CartService {
     @Transactional
     public CartResponse add(String email, CartItemRequest request) {
         UUID userId = identityQueryService.getUserId(email);
-        Dish preview = dishRepository.findById(request.dishId())
+        UUID kitchenId = dishRepository.findKitchenIdById(request.dishId())
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "DISH_NOT_FOUND", "Блюдо не найдено"));
-        Cart cart = cartRepository.findByUserIdForUpdate(userId).orElse(null);
-        if (cart == null) {
-            // There is no cart row to lock yet. Locking the owner serializes first-time creation.
-            userRepository.findByIdForUpdate(userId)
-                    .orElseThrow(() -> new ApiException(HttpStatus.UNAUTHORIZED, "USER_NOT_FOUND", "Пользователь не найден"));
-            cart = cartRepository.findByUserIdForUpdate(userId).orElse(null);
-            if (cart == null) {
-                cart = cartRepository.saveAndFlush(new Cart(userId));
-            }
-        }
-        Kitchen kitchen = kitchenRepository.findByIdForUpdate(preview.getKitchenId())
+        Cart cart = getOrCreateLockedCart(userId);
+        Kitchen kitchen = kitchenRepository.findByIdForUpdate(kitchenId)
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "KITCHEN_NOT_FOUND", "Кухня не найдена"));
         Dish dish = dishRepository.findByIdForUpdate(request.dishId())
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "DISH_NOT_FOUND", "Блюдо не найдено"));
@@ -115,9 +106,9 @@ public class CartService {
         Cart cart = getLockedCart(userId);
         CartItem item = itemRepository.findByCartIdAndDishId(cart.getId(), dishId)
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "CART_ITEM_NOT_FOUND", "Позиция корзины не найдена"));
-        Dish preview = dishRepository.findById(dishId)
+        UUID kitchenId = dishRepository.findKitchenIdById(dishId)
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "DISH_NOT_FOUND", "Блюдо не найдено"));
-        Kitchen kitchen = kitchenRepository.findByIdForUpdate(preview.getKitchenId())
+        Kitchen kitchen = kitchenRepository.findByIdForUpdate(kitchenId)
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "KITCHEN_NOT_FOUND", "Кухня не найдена"));
         Dish dish = dishRepository.findByIdForUpdate(dishId)
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "DISH_NOT_FOUND", "Блюдо не найдено"));
@@ -148,6 +139,23 @@ public class CartService {
         itemRepository.deleteByCartId(cart.getId());
         cart.setKitchenId(null);
         cart.touch();
+    }
+
+    @Transactional
+    public void lockForPreferenceUpdate(UUID userId) {
+        // Lock before reading/writing preferences, including for a previously absent cart.
+        getOrCreateLockedCart(userId);
+    }
+
+    private Cart getOrCreateLockedCart(UUID userId) {
+        Cart cart = cartRepository.findByUserIdForUpdate(userId).orElse(null);
+        if (cart == null) {
+            userRepository.findByIdForUpdate(userId)
+                    .orElseThrow(() -> new ApiException(HttpStatus.UNAUTHORIZED, "USER_NOT_FOUND", "Пользователь не найден"));
+            cart = cartRepository.findByUserIdForUpdate(userId).orElse(null);
+            if (cart == null) cart = cartRepository.saveAndFlush(new Cart(userId));
+        }
+        return cart;
     }
 
     @Transactional
