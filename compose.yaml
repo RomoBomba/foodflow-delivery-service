@@ -1,6 +1,25 @@
 services:
+  nginx:
+    image: nginx:stable-alpine
+    ports:
+      - "${HTTPS_BIND:-0.0.0.0}:${HTTPS_PORT:-443}:443"
+    volumes:
+      - ./deploy/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - type: bind
+        source: ${TLS_CERT_DIR:-./.local/tls}
+        target: /etc/nginx/tls
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${FRONTEND_DIST:-./frontend/dist}
+        target: /usr/share/nginx/html
+        read_only: true
+        bind:
+          create_host_path: false
+    depends_on:
+      - backend
   backend:
-    profiles: [app]
     build: ./backend
     environment:
       DB_URL: jdbc:postgresql://postgres:5432/foodflow
@@ -9,9 +28,8 @@ services:
       SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-}
       ADMIN_EMAIL: ${ADMIN_EMAIL:-}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
-      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
-    ports:
-      - "127.0.0.1:8080:8080"
+      SESSION_COOKIE_SECURE: "true"
+      SERVER_FORWARD_HEADERS_STRATEGY: native
     depends_on:
       postgres:
         condition: service_healthy
@@ -21,8 +39,6 @@ services:
       POSTGRES_DB: foodflow
       POSTGRES_USER: foodflow
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
-    ports:
-      - "127.0.0.1:5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:

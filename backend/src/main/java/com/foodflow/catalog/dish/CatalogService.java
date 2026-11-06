@@ -4,7 +4,7 @@ import com.foodflow.catalog.kitchen.Kitchen;
 import com.foodflow.catalog.kitchen.KitchenRepository;
 import com.foodflow.catalog.kitchen.KitchenStatus;
 import com.foodflow.feedback.ReviewQueryService;
-import com.foodflow.preferences.RecommendationService;
+import com.foodflow.recommendation.RecommendationService;
 import com.foodflow.feedback.ReviewSummaryResponse;
 import jakarta.persistence.criteria.Predicate;
 import org.springframework.data.domain.PageRequest;

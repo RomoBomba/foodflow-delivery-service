@@ -1,5 +1,9 @@
 package com.foodflow.identity;
 
+import jakarta.servlet.http.HttpServletResponse;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -24,6 +28,7 @@ public class SecurityConfig {
                         ).permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/auth/register").permitAll()
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.POST, "/api/orders/*/cancel").hasAnyRole("CLIENT", "KITCHEN")
                         .requestMatchers("/api/preferences", "/api/preferences/**",
                                 "/api/recommendations", "/api/recommendations/**",
                                 "/api/cart", "/api/cart/**",
@@ -44,8 +49,8 @@ public class SecurityConfig {
                 .requestCache(cache -> cache.disable())
                 .httpBasic(basic -> basic.disable())
                 .exceptionHandling(errors -> errors
-                        .authenticationEntryPoint((request, response, exception) -> response.setStatus(401))
-                        .accessDeniedHandler((request, response, exception) -> response.setStatus(403))
+                        .authenticationEntryPoint((request, response, exception) -> writeFailure(response, 401))
+                        .accessDeniedHandler((request, response, exception) -> writeFailure(response, 403))
                 )
                 .formLogin(login -> login
                         .loginPage("/api/auth/login")
@@ -53,7 +58,7 @@ public class SecurityConfig {
                         .usernameParameter("email")
                         .passwordParameter("password")
                         .successHandler((request, response, authentication) -> response.setStatus(204))
-                        .failureHandler((request, response, exception) -> response.setStatus(401))
+                        .failureHandler((request, response, exception) -> writeFailure(response, 401))
                         .permitAll()
                 )
                 .logout(logout -> logout
@@ -67,4 +72,15 @@ public class SecurityConfig {
 
         return http.build();
     }
+
+    private static void writeFailure(HttpServletResponse response, int status) throws IOException {
+        response.setStatus(status);
+        response.setCharacterEncoding(StandardCharsets.UTF_8.name());
+        response.setContentType("application/json");
+        // Fixed messages only: never return credentials or exception details.
+        response.getWriter().write(status == 401
+                ? "{\"code\":\"AUTHENTICATION_REQUIRED\",\"message\":\"Требуется вход с верными учётными данными\"}"
+                : "{\"code\":\"ACCESS_DENIED\",\"message\":\"Доступ запрещён или неверен CSRF-токен\"}");
+    }
+
 }

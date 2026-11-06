@@ -12,6 +12,7 @@ public record ReviewResponse(
         boolean reordered,
         String text,
         boolean visible,
+        ReviewStatus status,
         String moderationReason,
         UUID moderatedBy,
         Instant moderatedAt,
@@ -20,7 +21,7 @@ public record ReviewResponse(
     public static ReviewResponse from(Review review) {
         return new ReviewResponse(review.getId(), review.getOrderId(), review.getOrderItemId(),
                 review.getDishId(), review.getRating(), review.isReordered(), review.getReviewText(),
-                review.isVisible(), review.getModerationReason(), review.getModeratedBy(),
+                review.isVisible(), review.getStatus(), review.getModerationReason(), review.getModeratedBy(),
                 review.getModeratedAt(), review.getCreatedAt());
     }
 }

@@ -1,4 +1,4 @@
-package com.foodflow.preferences;
+package com.foodflow.recommendation;
 
 import jakarta.validation.Valid;
 import org.springframework.security.core.Authentication;

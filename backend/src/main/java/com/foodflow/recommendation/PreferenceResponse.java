@@ -1,4 +1,4 @@
-package com.foodflow.preferences;
+package com.foodflow.recommendation;
 
 import java.time.Instant;
 import java.util.Set;

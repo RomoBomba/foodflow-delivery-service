@@ -2,6 +2,8 @@ package com.foodflow.feedback;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.EnumType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
@@ -38,8 +40,9 @@ public class Review {
     @Column(name = "review_text", length = 1000)
     private String reviewText;
 
-    @Column(nullable = false)
-    private boolean visible = true;
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    private ReviewStatus status = ReviewStatus.VISIBLE;
 
     @Column(name = "moderation_reason", length = 500)
     private String moderationReason;
@@ -64,7 +67,7 @@ public class Review {
         this.rating = rating;
         this.reordered = reordered;
         this.reviewText = reviewText;
-        this.visible = true;
+        this.status = ReviewStatus.VISIBLE;
         this.createdAt = Instant.now();
     }
 
@@ -76,14 +79,15 @@ public class Review {
     public int getRating() { return rating; }
     public boolean isReordered() { return reordered; }
     public String getReviewText() { return reviewText; }
-    public boolean isVisible() { return visible; }
+    public ReviewStatus getStatus() { return status; }
+    public boolean isVisible() { return status == ReviewStatus.VISIBLE; }
     public String getModerationReason() { return moderationReason; }
     public UUID getModeratedBy() { return moderatedBy; }
     public Instant getModeratedAt() { return moderatedAt; }
     public Instant getCreatedAt() { return createdAt; }
 
     public void hide(UUID moderatorId, String reason) {
-        this.visible = false;
+        this.status = ReviewStatus.HIDDEN;
         this.moderatedBy = moderatorId;
         this.moderationReason = reason;
         this.moderatedAt = Instant.now();

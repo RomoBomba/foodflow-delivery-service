@@ -1,7 +1,6 @@
-package com.foodflow.preferences;
+package com.foodflow.recommendation;
 
-import com.foodflow.catalog.category.CategoryRepository;
-import com.foodflow.catalog.ingredient.IngredientRepository;
+import com.foodflow.catalog.CatalogQueryService;
 import com.foodflow.common.ApiException;
 import com.foodflow.identity.IdentityQueryService;
 import com.foodflow.ordering.CartService;
@@ -15,21 +14,18 @@ import java.util.UUID;
 @Service
 public class PreferenceService {
     private final PreferenceRepository repository;
-    private final CategoryRepository categoryRepository;
-    private final IngredientRepository ingredientRepository;
+    private final CatalogQueryService catalog;
     private final IdentityQueryService identityQueryService;
     private final CartService cartService;
 
     public PreferenceService(
             PreferenceRepository repository,
-            CategoryRepository categoryRepository,
-            IngredientRepository ingredientRepository,
+            CatalogQueryService catalog,
             IdentityQueryService identityQueryService,
             CartService cartService
     ) {
         this.repository = repository;
-        this.categoryRepository = categoryRepository;
-        this.ingredientRepository = ingredientRepository;
+        this.catalog = catalog;
         this.identityQueryService = identityQueryService;
         this.cartService = cartService;
     }
@@ -58,13 +54,13 @@ public class PreferenceService {
             throw new ApiException(HttpStatus.BAD_REQUEST, "PREFERENCE_INGREDIENT_CONFLICT", "Ингредиент нельзя одновременно любить и исключать");
         }
         if (!request.favoriteCategoryIds().isEmpty()
-                && categoryRepository.countByIdIn(request.favoriteCategoryIds()) != request.favoriteCategoryIds().size()) {
+                && catalog.countCategories(request.favoriteCategoryIds()) != request.favoriteCategoryIds().size()) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "UNKNOWN_CATEGORY", "Одна или несколько категорий не найдены");
         }
         Set<UUID> ingredientIds = new java.util.HashSet<>(request.favoriteIngredientIds());
         ingredientIds.addAll(request.excludedIngredientIds());
         if (!ingredientIds.isEmpty()
-                && ingredientRepository.countByIdIn(ingredientIds) != ingredientIds.size()) {
+                && catalog.countIngredients(ingredientIds) != ingredientIds.size()) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "UNKNOWN_INGREDIENT", "Один или несколько ингредиентов не найдены");
         }
 

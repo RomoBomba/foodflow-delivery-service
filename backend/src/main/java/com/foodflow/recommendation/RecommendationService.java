@@ -1,12 +1,11 @@
-package com.foodflow.preferences;
+package com.foodflow.recommendation;
 
 import com.foodflow.catalog.dish.CatalogDishResponse;
 import com.foodflow.catalog.dish.Dish;
 import com.foodflow.catalog.dish.DishPageResponse;
-import com.foodflow.catalog.dish.DishRepository;
+import com.foodflow.catalog.CatalogQueryService;
 import com.foodflow.catalog.ingredient.Ingredient;
 import com.foodflow.catalog.kitchen.Kitchen;
-import com.foodflow.catalog.kitchen.KitchenRepository;
 import com.foodflow.catalog.kitchen.KitchenStatus;
 import com.foodflow.common.ApiException;
 import com.foodflow.feedback.ReviewQueryService;
@@ -28,21 +27,18 @@ import java.util.stream.Collectors;
 @Service
 public class RecommendationService {
     private final PreferenceRepository preferenceRepository;
-    private final DishRepository dishRepository;
-    private final KitchenRepository kitchenRepository;
+    private final CatalogQueryService catalog;
     private final IdentityQueryService identityQueryService;
     private final ReviewQueryService reviewQueryService;
 
     public RecommendationService(
             PreferenceRepository preferenceRepository,
-            DishRepository dishRepository,
-            KitchenRepository kitchenRepository,
+            CatalogQueryService catalog,
             IdentityQueryService identityQueryService,
             ReviewQueryService reviewQueryService
     ) {
         this.preferenceRepository = preferenceRepository;
-        this.dishRepository = dishRepository;
-        this.kitchenRepository = kitchenRepository;
+        this.catalog = catalog;
         this.identityQueryService = identityQueryService;
         this.reviewQueryService = reviewQueryService;
     }
@@ -93,9 +89,9 @@ public class RecommendationService {
     @Transactional(readOnly = true)
     public DishCompatibilityResponse checkCompatibility(String email, UUID dishId) {
         UUID userId = identityQueryService.getUserId(email);
-        Dish dish = dishRepository.findById(dishId)
+        Dish dish = catalog.findDish(dishId)
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "DISH_NOT_FOUND", "Блюдо не найдено"));
-        Kitchen kitchen = kitchenRepository.findById(dish.getKitchenId()).orElse(null);
+        Kitchen kitchen = catalog.findKitchen(dish.getKitchenId()).orElse(null);
         if (dish.isArchived() || kitchen == null || kitchen.getStatus() != KitchenStatus.APPROVED) {
             throw new ApiException(HttpStatus.NOT_FOUND, "DISH_NOT_FOUND", "Блюдо не найдено");
         }
@@ -121,10 +117,10 @@ public class RecommendationService {
         UUID userId = identityQueryService.getUserId(email);
         Preference preference = preferenceRepository.findById(userId).orElse(null);
         Set<UUID> excluded = preference == null ? Set.of() : preference.getExcludedIngredientIds();
-        Map<UUID, Kitchen> kitchens = kitchenRepository.findAll().stream()
+        Map<UUID, Kitchen> kitchens = catalog.kitchens().stream()
                 .collect(Collectors.toMap(Kitchen::getId, kitchen -> kitchen));
 
-        List<Dish> eligible = dishRepository.findAllByArchivedFalse().stream()
+        List<Dish> eligible = catalog.unarchivedDishes().stream()
                 .filter(dish -> {
                     Kitchen kitchen = kitchens.get(dish.getKitchenId());
                     return kitchen != null

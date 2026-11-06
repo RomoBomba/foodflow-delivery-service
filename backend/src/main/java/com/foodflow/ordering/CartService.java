@@ -1,16 +1,14 @@
 package com.foodflow.ordering;
 
 import com.foodflow.catalog.dish.Dish;
-import com.foodflow.catalog.dish.DishRepository;
+import com.foodflow.catalog.CatalogQueryService;
+import com.foodflow.catalog.CatalogStockService;
 import com.foodflow.catalog.ingredient.Ingredient;
 import com.foodflow.catalog.kitchen.Kitchen;
-import com.foodflow.catalog.kitchen.KitchenRepository;
 import com.foodflow.catalog.kitchen.KitchenStatus;
 import com.foodflow.common.ApiException;
 import com.foodflow.identity.IdentityQueryService;
-import com.foodflow.identity.UserRepository;
-import com.foodflow.preferences.Preference;
-import com.foodflow.preferences.PreferenceRepository;
+import com.foodflow.recommendation.PreferenceQueryService;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -24,28 +22,25 @@ import java.util.UUID;
 public class CartService {
     private final CartRepository cartRepository;
     private final CartItemRepository itemRepository;
-    private final DishRepository dishRepository;
-    private final KitchenRepository kitchenRepository;
-    private final PreferenceRepository preferenceRepository;
+    private final CatalogQueryService catalog;
+    private final CatalogStockService stock;
+    private final PreferenceQueryService preferenceQuery;
     private final IdentityQueryService identityQueryService;
-    private final UserRepository userRepository;
 
     public CartService(
             CartRepository cartRepository,
             CartItemRepository itemRepository,
-            DishRepository dishRepository,
-            KitchenRepository kitchenRepository,
-            PreferenceRepository preferenceRepository,
-            IdentityQueryService identityQueryService,
-            UserRepository userRepository
+            CatalogQueryService catalog,
+            CatalogStockService stock,
+            PreferenceQueryService preferenceQuery,
+            IdentityQueryService identityQueryService
     ) {
         this.cartRepository = cartRepository;
         this.itemRepository = itemRepository;
-        this.dishRepository = dishRepository;
-        this.kitchenRepository = kitchenRepository;
-        this.preferenceRepository = preferenceRepository;
+        this.catalog = catalog;
+        this.stock = stock;
+        this.preferenceQuery = preferenceQuery;
         this.identityQueryService = identityQueryService;
-        this.userRepository = userRepository;
     }
 
     @Transactional(readOnly = true)
@@ -59,15 +54,14 @@ public class CartService {
     @Transactional
     public CartResponse add(String email, CartItemRequest request) {
         UUID userId = identityQueryService.getUserId(email);
-        UUID kitchenId = dishRepository.findKitchenIdById(request.dishId())
+        UUID kitchenId = catalog.findKitchenIdByDishId(request.dishId())
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "DISH_NOT_FOUND", "Блюдо не найдено"));
         Cart cart = getOrCreateLockedCart(userId);
-        Kitchen kitchen = kitchenRepository.findByIdForUpdate(kitchenId)
+        Kitchen kitchen = stock.lockKitchen(kitchenId)
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "KITCHEN_NOT_FOUND", "Кухня не найдена"));
-        Dish dish = dishRepository.findByIdForUpdate(request.dishId())
+        Dish dish = stock.lockDish(request.dishId())
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "DISH_NOT_FOUND", "Блюдо не найдено"));
-        ensurePurchasable(dish, kitchen, request.quantity());
-        ensureNotExcluded(userId, dish);
+        stock.ensurePurchasable(dish, kitchen, request.quantity(), preferenceQuery.excludedIngredients(userId));
 
         if (cart.getKitchenId() != null && !cart.getKitchenId().equals(kitchen.getId())) {
             if (!request.confirmReplaceKitchen()) {
@@ -88,7 +82,7 @@ public class CartService {
             if (updatedQuantity > 99) {
                 throw new ApiException(HttpStatus.BAD_REQUEST, "CART_QUANTITY_LIMIT", "В корзине допускается не более 99 порций одного блюда");
             }
-            ensurePurchasable(dish, kitchen, updatedQuantity);
+            stock.ensurePurchasable(dish, kitchen, updatedQuantity, preferenceQuery.excludedIngredients(userId));
             existing.setQuantity(updatedQuantity);
         } else {
             if (itemRepository.findAllByCartIdOrderByDishIdAsc(cart.getId()).size() >= 30) {
@@ -106,14 +100,13 @@ public class CartService {
         Cart cart = getLockedCart(userId);
         CartItem item = itemRepository.findByCartIdAndDishId(cart.getId(), dishId)
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "CART_ITEM_NOT_FOUND", "Позиция корзины не найдена"));
-        UUID kitchenId = dishRepository.findKitchenIdById(dishId)
+        UUID kitchenId = catalog.findKitchenIdByDishId(dishId)
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "DISH_NOT_FOUND", "Блюдо не найдено"));
-        Kitchen kitchen = kitchenRepository.findByIdForUpdate(kitchenId)
+        Kitchen kitchen = stock.lockKitchen(kitchenId)
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "KITCHEN_NOT_FOUND", "Кухня не найдена"));
-        Dish dish = dishRepository.findByIdForUpdate(dishId)
+        Dish dish = stock.lockDish(dishId)
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "DISH_NOT_FOUND", "Блюдо не найдено"));
-        ensurePurchasable(dish, kitchen, quantity);
-        ensureNotExcluded(userId, dish);
+        stock.ensurePurchasable(dish, kitchen, quantity, preferenceQuery.excludedIngredients(userId));
         item.setQuantity(quantity);
         cart.touch();
         return toResponse(cart);
@@ -150,8 +143,7 @@ public class CartService {
     private Cart getOrCreateLockedCart(UUID userId) {
         Cart cart = cartRepository.findByUserIdForUpdate(userId).orElse(null);
         if (cart == null) {
-            userRepository.findByIdForUpdate(userId)
-                    .orElseThrow(() -> new ApiException(HttpStatus.UNAUTHORIZED, "USER_NOT_FOUND", "Пользователь не найден"));
+            identityQueryService.lockUser(userId);
             cart = cartRepository.findByUserIdForUpdate(userId).orElse(null);
             if (cart == null) cart = cartRepository.saveAndFlush(new Cart(userId));
         }
@@ -163,7 +155,7 @@ public class CartService {
         if (excludedIngredientIds == null || excludedIngredientIds.isEmpty()) return;
         cartRepository.findByUserIdForUpdate(userId).ifPresent(cart -> {
             for (CartItem item : itemRepository.findAllByCartIdOrderByDishIdAsc(cart.getId())) {
-                dishRepository.findById(item.getDishId()).ifPresent(dish -> {
+                catalog.findDish(item.getDishId()).ifPresent(dish -> {
                     boolean incompatible = dish.getIngredients().stream()
                             .map(Ingredient::getId)
                             .anyMatch(excludedIngredientIds::contains);
@@ -182,38 +174,14 @@ public class CartService {
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "CART_NOT_FOUND", "Корзина не найдена"));
     }
 
-    private void ensurePurchasable(Dish dish, Kitchen kitchen, int quantity) {
-        if (dish.isArchived()) {
-            throw new ApiException(HttpStatus.CONFLICT, "DISH_ARCHIVED", "Архивное блюдо нельзя заказать");
-        }
-        if (kitchen.getStatus() != KitchenStatus.APPROVED || !kitchen.isAcceptingOrders()) {
-            throw new ApiException(HttpStatus.CONFLICT, "KITCHEN_CLOSED", "Кухня сейчас не принимает заказы");
-        }
-        if (dish.getAvailablePortions() < quantity) {
-            throw new ApiException(HttpStatus.CONFLICT, "INSUFFICIENT_STOCK", "Недостаточно свободных порций", java.util.Map.of("availablePortions", dish.getAvailablePortions()));
-        }
-    }
-
-    private void ensureNotExcluded(UUID userId, Dish dish) {
-        Preference preference = preferenceRepository.findById(userId).orElse(null);
-        if (preference == null || preference.getExcludedIngredientIds().isEmpty()) return;
-        var conflict = dish.getIngredients().stream()
-                .map(Ingredient::getId)
-                .filter(preference.getExcludedIngredientIds()::contains)
-                .findFirst();
-        if (conflict.isPresent()) {
-            throw new ApiException(HttpStatus.CONFLICT, "EXCLUDED_INGREDIENT", "Блюдо содержит исключённый ингредиент", java.util.Map.of("ingredientId", conflict.get()));
-        }
-    }
-
     private CartResponse toResponse(Cart cart) {
         List<CartItemResponse> items = new ArrayList<>();
         BigDecimal total = BigDecimal.ZERO;
         boolean changed = false;
         for (CartItem item : itemRepository.findAllByCartIdOrderByDishIdAsc(cart.getId())) {
-            Dish dish = dishRepository.findById(item.getDishId()).orElse(null);
+            Dish dish = catalog.findDish(item.getDishId()).orElse(null);
             if (dish == null) continue;
-            Kitchen kitchen = kitchenRepository.findById(dish.getKitchenId()).orElse(null);
+            Kitchen kitchen = catalog.findKitchen(dish.getKitchenId()).orElse(null);
             boolean available = kitchen != null
                     && kitchen.getStatus() == KitchenStatus.APPROVED
                     && kitchen.isAcceptingOrders()

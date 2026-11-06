@@ -2,6 +2,7 @@ package com.foodflow.ordering;
 
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
@@ -16,13 +17,13 @@ public class OrderController {
     public OrderController(OrderService service) { this.service = service; }
 
     @PostMapping
-    @ResponseStatus(HttpStatus.CREATED)
-    public OrderResponse create(
+    public ResponseEntity<OrderResponse> create(
             Authentication authentication,
             @RequestHeader("Idempotency-Key") String idempotencyKey,
             @Valid @RequestBody OrderCreateRequest request
     ) {
-        return service.create(authentication.getName(), idempotencyKey, request);
+        OrderCreationResult result = service.create(authentication.getName(), idempotencyKey, request);
+        return ResponseEntity.status(result.replayed() ? HttpStatus.OK : HttpStatus.CREATED).body(result.order());
     }
 
     @GetMapping
@@ -36,7 +37,14 @@ public class OrderController {
     }
 
     @PostMapping("/{id}/cancel")
-    public OrderResponse cancel(Authentication authentication, @PathVariable UUID id) {
-        return service.cancelByCustomer(authentication.getName(), id);
+    public OrderResponse cancel(Authentication authentication, @PathVariable UUID id,
+                                @Valid @RequestBody OrderCancelRequest request) {
+        boolean kitchen = authentication.getAuthorities().stream()
+                .anyMatch(authority -> authority.getAuthority().equals("ROLE_KITCHEN"));
+        if (kitchen) {
+            return service.changeStatusByKitchen(authentication.getName(), id,
+                    new OrderStatusRequest(OrderStatus.CANCELLED, request.expectedVersion(), request.reason()));
+        }
+        return service.cancelByCustomer(authentication.getName(), id, request.expectedVersion());
     }
 }
