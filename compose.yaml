@@ -1,4 +1,11 @@
 services:
+  frontend:
+    profiles: [app]
+    build: ./frontend
+    ports:
+      - "127.0.0.1:3000:80"
+    depends_on:
+      - backend
   backend:
     profiles: [app]
     build: ./backend

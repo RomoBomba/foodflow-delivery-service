@@ -4,13 +4,15 @@
 
 Backend объединяет основную разработку из [PR №10](https://github.com/RomoBomba/foodflow-delivery-service/pull/10) и исправления, подтверждённые 74 автоматическими тестами на Java 21 и PostgreSQL.
 
-Backend реализует каталог → корзину → оформление → обработку кухней → выполнение → отзыв. Также реализованы регистрация и сессии, модерация кухонь, предпочтения, объяснимые рекомендации и модерация отзывов. Frontend разрабатывается отдельно; в этом репозитории пока нет React-приложения и Nginx.
+Backend реализует каталог → корзину → оформление → обработку кухней → выполнение → отзыв. Также реализованы регистрация и сессии, модерация кухонь, предпочтения, объяснимые рекомендации и модерация отзывов. Frontend (`frontend/`, React + TypeScript + Vite) покрывает кабинеты клиента, кухни и администратора и в Compose отдаётся через Nginx.
 
-Основной источник требований — [ТЗ этапа 2](docs/FoodFlow_TZ_Stage2.docx). [Контракты для frontend](docs/API.md) и [проверки backend](docs/BACKEND_VERIFICATION.md) описывают текущий код. Диаграммы в `docs/diagrams/` описывают целевую систему, а не подтверждённое покрытие.
+Основной источник требований — [ТЗ этапа 2](docs/FoodFlow_TZ_Stage2.docx). [Контракты для frontend](docs/API.md) и [проверки backend](docs/BACKEND_VERIFICATION.md) описывают текущий код. Диаграммы в `docs/diagrams/` описывают целевую систему, а не подтверждённое покрытие; [макеты экранов](docs/mockups/) — схемы интерфейса, а не финальный дизайн.
 
 ## Стек и архитектура
 
 Java 21, Spring Boot 4.1.2, Maven Wrapper, Spring MVC, Spring Security, JPA/Hibernate, PostgreSQL 17, Flyway. Пароли хешируются PBKDF2. Авторизация использует серверную HTTP-сессию, cookie `JSESSIONID` и CSRF.
+
+Frontend: React 18, TypeScript, Vite 6, React Router; версии зафиксированы в `frontend/package-lock.json`. Браузер обращается к API только по относительным `/api` в рамках одного origin (прокси Vite при разработке, Nginx в Compose), поэтому CORS не нужен.
 
 Модульный монолит в пакете `com.foodflow`:
 
@@ -51,7 +53,7 @@ docker compose --profile app ps
 curl --fail http://localhost:8080/api/health
 ```
 
-Backend доступен на `http://localhost:8080`; PostgreSQL — `localhost:5433`. Порты привязаны к loopback. Backend внутри Compose подключается к `postgres:5432`. Первой сборке нужен интернет для образов и Maven-зависимостей. Backend запускается после готовности БД; применение миграций занимает дополнительное время.
+Приложение открывается на `http://localhost:3000` (Nginx: статика frontend и прокси `/api` на backend). Backend напрямую доступен на `http://localhost:8080`; PostgreSQL — `localhost:5433`. Порты привязаны к loopback. Backend внутри Compose подключается к `postgres:5432`. Первой сборке нужен интернет для образов и Maven-зависимостей. Backend запускается после готовности БД; применение миграций занимает дополнительное время.
 
 Ожидаемый ответ health: `{"status":"UP","application":"FoodFlow"}`. На чистой БД каталог пуст, справочники заполнены миграциями. Health подтверждает работу HTTP-приложения, но не является отдельной проверкой доступности БД.
 
@@ -90,6 +92,20 @@ cd backend
 | `SESSION_COOKIE_SECURE` | `false` для локального HTTP, `true` для HTTPS |
 
 Администратор создаётся только при профиле `local`. Существующий пароль не сбрасывается; занятый обычным пользователем email не повышается до ADMIN. Публичная регистрация всегда создаёт CLIENT.
+
+### Запуск frontend для разработки
+
+Нужен Node.js 20+ и запущенный backend на `localhost:8080` (контейнерный или из IDE):
+
+```bash
+cd frontend
+npm ci
+npm run dev
+```
+
+Интерфейс открывается на `http://localhost:5173`; запросы `/api` проксируются на backend. Другой адрес backend задаётся переменной `FOODFLOW_BACKEND_URL`. Проверки: `npm test` (модульные тесты), `npm run build` (типы и сборка).
+
+Роли и кабинеты: гость видит каталог; CLIENT — корзину, заказы, отзывы и предпочтения; после одобрения заявки аккаунт становится KITCHEN и после повторного входа открывает кабинет кухни (`/kitchen`); ADMIN — модерацию (`/admin`). Открытые списки заказов обновляются раз в 15 секунд, пока вкладка активна.
 
 ### Демонстрационные данные и сквозная проверка
 
@@ -134,7 +150,7 @@ JUnit и Testcontainers поднимают **отдельную чистую Pos
 ./mvnw -B -Dtest=RecommendationScorerTest,OrderTransitionsTest test
 ```
 
-Отчёты: `backend/target/surefire-reports/`. Workflow `.github/workflows/backend.yml` запускает `verify` для PR с изменениями backend и для `main`, сохраняет отчёты. Результаты запусков доступны в [GitHub Actions](https://github.com/RomoBomba/foodflow-delivery-service/actions/workflows/backend.yml).
+Отчёты: `backend/target/surefire-reports/`. Workflow `.github/workflows/backend.yml` запускает `verify` для PR с изменениями backend и для `main`, сохраняет отчёты. Workflow `.github/workflows/frontend.yml` запускает `npm test` и `npm run build` для PR с изменениями frontend. Результаты запусков доступны в [GitHub Actions](https://github.com/RomoBomba/foodflow-delivery-service/actions/workflows/backend.yml).
 
 [Протокол backend](docs/BACKEND_VERIFICATION.md) отделяет выполненные проверки от оставшихся приёмочных испытаний. Цели p95 ≤ 500 мс для чтения, ≤ 800 мс для оформления и 5xx < 1% **не являются измеренным результатом**.
 
@@ -164,4 +180,4 @@ docker compose --profile app start backend
 
 Роман Шевцов — координация, интеграция и документация; Данила Наумов — основная разработка backend; Александр Гунин и Иван Белисов — остальные участники команды. Актуальное распределение задач согласуется командой; frontend ведётся отдельно.
 
-Материалы: [ТЗ](docs/FoodFlow_TZ_Stage2.docx), [требования и архитектура](docs/FoodFlow_Stage2_Requirements.pptx), [ранняя концепция](docs/FoodFlow-tech-platform.pptx), [диаграммы](docs/diagrams/).
+Материалы: [ТЗ](docs/FoodFlow_TZ_Stage2.docx), [требования и архитектура](docs/FoodFlow_Stage2_Requirements.pptx), [ранняя концепция](docs/FoodFlow-tech-platform.pptx), [диаграммы](docs/diagrams/), [макеты экранов](docs/mockups/).
