@@ -34,7 +34,7 @@ Cookie `JSESSIONID`: HttpOnly, SameSite=Lax, Secure на HTTPS-стенде; н�
 | POST | `/api/admin/kitchens/{id}/reject` | ADMIN; `{reason:"..."}` |
 | POST | `/api/admin/kitchens/{id}/block` | ADMIN; `{reason:"..."}` |
 
-Заявка: `{name,description,contacts,deliveryArea}`. Ограничения длины: 120/1000/500/200; поля обязательны. Статусы кухни: PENDING, APPROVED, REJECTED, BLOCKED.
+Заявка: `{name,description,contacts,deliveryArea}`. Ограничения длины: 120/1000/500/200; поля обязательны. `contacts` содержит телефон или email; несколько контактов разделяются `;`, запятой или переводом строки. Каждый контакт проверяется; телефон — по правилам оформления заказа, email — до 254 символов. Ошибка: `400 INVALID_CONTACTS` с `fields.contacts`. Статусы кухни: PENDING, APPROVED, REJECTED, BLOCKED.
 
 Создание и PUT блюда принимают:
 
@@ -72,11 +72,13 @@ CLIENT: `GET/PUT /api/preferences`. PUT заменяет профиль:
 }
 ```
 
-В каждом списке до 100 UUID. Пропущенные списки трактуются как пустые. Ответ содержит эти поля, `userId` и `updatedAt`. Исключённые блюда удаляются из текущей корзины в той же транзакции. После успешного PUT обновите отображение корзины.
+В каждом списке до 100 UUID. Пропущенные списки трактуются как пустые. Ответ содержит эти поля, `userId` и `updatedAt`. Содержимое корзины сохраняется; меняются предупреждения об исключённых ингредиентах. После успешного PUT обновите отображение корзины.
 
-`GET /api/recommendations?page=0&size=20` возвращает `{scoringEnabled,page,size,totalElements,totalPages,message,content}`. Элемент `content`: `{dish,score,explanation}`; `dish` — карточка каталога, `explanation` — массив строк. Необязательный `dishIds` — до 100 UUID через запятую — ограничивает подбор указанными блюдами до пагинации; используется для баллов текущей страницы каталога. Исключённые ингредиенты остаются жёстким ограничением. При пустом профиле `score=null`. Балл 0–100, веса 50/30/20 нормируются по активным критериям, при равенстве порядок задаётся ID.
+`GET /api/recommendations?page=0&size=20` возвращает `{scoringEnabled,page,size,totalElements,totalPages,message,content}`. Элемент `content`: `{dish,score,explanation}`; `dish` — карточка каталога, `explanation` — массив строк. Необязательный `dishIds` — до 100 UUID через запятую — ограничивает подбор указанными блюдами до пагинации; используется для баллов текущей страницы каталога. Исключённые ингредиенты ограничивают только персональную выдачу. При пустом профиле `score=null`. Балл 0–100, веса 50/30/20 нормируются по активным критериям, при равенстве порядок задаётся ID.
 
 `GET /api/recommendations/dishes/{dishId}/compatibility` возвращает `{dishId,compatible,reason,excludedIngredientId}`. Для скрытого из каталога блюда — 404. Причина нужна для показа несовместимости при открытии карточки по прямой ссылке.
+
+Изменение требования от 06.11.2026: исключённые ингредиенты предупреждают о несовместимости, но не запрещают добавление, изменение количества и оформление, в том числе для другого получателя. Это заменяет исходное правило ТЗ о жёстком запрете покупки. Диаграммы и исходный файл ТЗ не редактировались.
 
 ## Корзина
 
@@ -92,7 +94,7 @@ CLIENT: `GET/PUT /api/preferences`. PUT заменяет профиль:
 
 POST **прибавляет** количество; PATCH **задаёт** его. Количество — целое 1–99. `confirmReplaceKitchen` можно опустить; по умолчанию false. При `409 CART_KITCHEN_MISMATCH` покажите подтверждение очистки и только затем повторите с true. При ошибке прежняя корзина сохраняется. POST корзины не является идемпотентным: после сетевой ошибки сначала перечитайте корзину, не повторяйте добавление автоматически.
 
-Ответ: `{id,kitchenId,items,totalPrice,hasPriceChanges,updatedAt}`. Элемент: `{dishId,dishName,quantity,priceAtAdd,currentPrice,lineTotal,priceChanged,availablePortions,available}`. `totalPrice` использует актуальные цены. Старая цена нужна для проверки при оформлении; изменение количества её не подтверждает.
+Ответ: `{id,kitchenId,items,totalPrice,hasPriceChanges,updatedAt}`. Элемент: `{dishId,dishName,quantity,priceAtAdd,currentPrice,lineTotal,priceChanged,availablePortions,available,photoUrl,excludedIngredients}`. `photoUrl` — актуальный URL фотографии или null; `excludedIngredients` — имена исключённых клиентом ингредиентов, пустой массив при отсутствии конфликтов. Это предупреждение, оно не делает `available=false`. `totalPrice` использует актуальные цены. Старая цена нужна для проверки при оформлении; изменение количества её не подтверждает.
 
 ## Оформление, повтор и цены
 
@@ -155,4 +157,4 @@ POST **прибавляет** количество; PATCH **задаёт** ег�
 
 400 — неверные поля, JSON или параметры; 401 — нужен вход; 403 — роль или CSRF; 404 — объект отсутствует либо чужой; 409 — бизнес-конфликт. Ошибки прикладных контроллеров содержат `code,message`, иногда `fields` или дополнительные поля расчёта. Spring Security возвращает тот же формат: 401 — `AUTHENTICATION_REQUIRED`, 403 — `ACCESS_DENIED`. При 401 откройте вход; при 403 проверьте актуальность CSRF и доступную роль. Сетевые ошибки и ответы прокси могут не содержать JSON. `X-Request-ID` позволяет сопоставить ответ с журналом, включая отказы Security.
 
-Основные коды для корзины/заказов: `CART_EMPTY`, `CART_CHANGED`, `CART_KITCHEN_MISMATCH`, `CART_ITEMS_LIMIT`, `CART_QUANTITY_LIMIT`, `KITCHEN_CLOSED`, `DISH_ARCHIVED`, `DISH_UNAVAILABLE`, `INSUFFICIENT_STOCK`, `EXCLUDED_INGREDIENT`, `PRICE_CHANGED`, `IDEMPOTENCY_KEY_REUSED`, `ORDER_NOT_CANCELLABLE`, `ORDER_VERSION_CONFLICT`, `INVALID_ORDER_TRANSITION`. Для отзывов: `ORDER_NOT_COMPLETED`, `REVIEW_ALREADY_EXISTS`, `REVIEW_ITEM_NOT_IN_ORDER`, `REVIEW_ALREADY_HIDDEN`. Некорректный JSON, заголовки и типы параметров: `INVALID_REQUEST`; ошибки DTO: `VALIDATION_ERROR` с `fields`.
+Основные коды для корзины/заказов: `CART_EMPTY`, `CART_CHANGED`, `CART_KITCHEN_MISMATCH`, `CART_ITEMS_LIMIT`, `CART_QUANTITY_LIMIT`, `KITCHEN_CLOSED`, `DISH_ARCHIVED`, `DISH_UNAVAILABLE`, `INSUFFICIENT_STOCK`, `PRICE_CHANGED`, `IDEMPOTENCY_KEY_REUSED`, `ORDER_NOT_CANCELLABLE`, `ORDER_VERSION_CONFLICT`, `INVALID_ORDER_TRANSITION`. Для отзывов: `ORDER_NOT_COMPLETED`, `REVIEW_ALREADY_EXISTS`, `REVIEW_ITEM_NOT_IN_ORDER`, `REVIEW_ALREADY_HIDDEN`. Некорректный JSON, заголовки и типы параметров: `INVALID_REQUEST`; ошибки DTO: `VALIDATION_ERROR` с `fields`.

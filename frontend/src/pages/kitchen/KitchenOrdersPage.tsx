@@ -1,3 +1,4 @@
+import { OrderStageTimer } from '../../components/OrderStageTimer';
 import { useState } from 'react';
 import { errorText, isApiError } from '../../api/client';
 import { kitchenApi } from '../../api/endpoints';
@@ -155,6 +156,7 @@ function OrderCard({ order, busy, onNext, onReject }: { order: Order; busy: bool
         <b>{formatTime(order.createdAt)} · № {shortOrderNumber(order.orderNumber)}</b>
         {finished ? <OrderStatusBadge status={order.status} /> : <span className="strong num">{formatMoney(order.totalPrice)}</span>}
       </div>
+      {!finished && <div className="mt-8"><OrderStageTimer order={order} /></div>}
       {finished ? (
         <div className="addr mt-8">
           {countLabel(portions, ['порция', 'порции', 'порций'])} · {formatMoney(order.totalPrice)}

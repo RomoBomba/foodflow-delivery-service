@@ -5,6 +5,7 @@ import {
   parseInteger,
   parsePrice,
   validateAddress,
+  validateContacts,
   validateEmail,
   validatePassword,
   validatePhone,
@@ -74,5 +75,14 @@ describe('Idempotency-Key (FR-14)', () => {
     const key = newIdempotencyKey();
     expect(isValidIdempotencyKey(key)).toBe(true);
     expect(newIdempotencyKey()).not.toBe(key);
+  });
+});
+
+describe('контакты кухни', () => {
+  it.each(['0окшк', '0000000000', 'wrong@', 'a@b.test; 0000000000'])('отклоняет %s', (value) => {
+    expect(validateContacts(value)).not.toBeNull();
+  });
+  it.each(['+7 (999) 123-45-67', 'kitchen@example.test', '79991234567; kitchen@example.test'])('принимает %s', (value) => {
+    expect(validateContacts(value)).toBeNull();
   });
 });

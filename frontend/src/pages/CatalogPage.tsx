@@ -317,7 +317,7 @@ function DishCard({ dish, score, excludedIngredients, busy, onAdd }: { dish: Cat
         url={dish.photoUrl}
         name={dish.name}
         label={
-          excluded ? <span className="score incompatible" title="Содержит исключённый вами ингредиент">Не подходит</span> : score !== undefined ? (
+          excluded ? <span className="score incompatible" title="Содержит исключённый вами ингредиент">Есть исключения</span> : score !== undefined ? (
             <span className="score" title="Соответствие вашему профилю, 0–100">
               {score}<span className="word"> · соответствие</span>
             </span>
@@ -335,11 +335,11 @@ function DishCard({ dish, score, excludedIngredients, busy, onAdd }: { dish: Cat
             <span className="out">{dish.availablePortions === 0 ? 'нет в наличии' : 'кухня не принимает заказы'}</span>
           )}
         </div>
-        {excluded && <p className="tiny out">Исключено в предпочтениях: {excludedIngredients.join(', ')}</p>}
+        {excluded && <p className="tiny preference-warning">Исключено в предпочтениях: {excludedIngredients.join(', ')}</p>}
         <RatingLine {...dish} />
         <div className="foot">
           <span className="price">{formatMoney(dish.price)}</span>
-          <div className="card-action"><BuyButton dish={dish} busy={busy} onAdd={onAdd} blockedReason={excluded ? "Содержит исключённый вами ингредиент" : null} /></div>
+          <div className="card-action"><BuyButton dish={dish} busy={busy} onAdd={onAdd} /></div>
         </div>
       </div>
     </article>

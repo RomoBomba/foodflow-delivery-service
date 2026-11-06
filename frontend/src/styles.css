@@ -468,3 +468,15 @@ tr.selected td { background: var(--accent-soft); }
   .card, .select-trigger svg { transition: none; }
   .card:hover { transform: none; }
 }
+
+/* Keep the first header row and menu control fixed when navigation expands. */
+.topbar { row-gap: 0; }
+.topbar > .logo, .topbar > .right { min-height: 64px; }
+.topbar .menu-toggle { width: 84px; min-width: 84px; flex: none; justify-content: center; }
+.preference-warning, .score.incompatible { color: #805b17; }
+.order-updates { display: flex; align-items: center; gap: 12px 24px; flex-wrap: wrap; }
+.stage-timer { display: inline-flex; align-items: center; gap: 12px; padding: 8px 12px; border: 1px solid #b5d3bd; border-radius: 9px; background: var(--accent-soft); font-size: 13px; color: var(--accent-dark); white-space: nowrap; }
+.stage-time { min-width: 5ch; text-align: right; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-variant-numeric: tabular-nums; }
+@media (max-width: 600px) {
+  .topbar > .logo, .topbar > .right { min-height: 56px; }
+}

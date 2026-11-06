@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
 import { ApiError } from '../api/client';
 import { preferencesApi } from '../api/endpoints';
 import type { NamedRef, Preferences, PreferencesRequest } from '../api/types';
@@ -39,7 +38,6 @@ export function PreferencesPage() {
   const [form, setForm] = useState<FormState | null>(null);
   const [submitError, setSubmitError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
-  const [removed, setRemoved] = useState<string[]>([]);
   const [showErrors, setShowErrors] = useState(false);
 
   useEffect(() => {
@@ -73,19 +71,13 @@ export function PreferencesPage() {
     };
     setBusy(true);
     setSubmitError(null);
-    setRemoved([]);
-    const before = cart.cart.items;
     try {
       const saved = await preferencesApi.save(request);
       prefs.setData(saved);
       setForm(fromPrefs(saved));
       setShowErrors(false);
-      // Сервер в той же транзакции убирает из корзины несовместимые блюда (раздел 7.2).
-      const after = await cart.refresh().catch(() => null);
-      if (after) {
-        const left = new Set(after.items.map((i) => i.dishId));
-        setRemoved(before.filter((i) => !left.has(i.dishId)).map((i) => i.dishName));
-      }
+      // Обновляем предупреждения; содержимое корзины сохраняется.
+      await cart.refresh().catch(() => null);
       toast('Предпочтения сохранены', 'ok');
     } catch (error) {
       setSubmitError(error);
@@ -134,7 +126,7 @@ export function PreferencesPage() {
               <p className="err-text">{shownErrors.conflict ?? 'Ингредиент нельзя одновременно любить и исключать'}</p>
             )}
             <p className="tiny muted mt-8">
-              Блюда с исключёнными ингредиентами не попадут в подбор, и их нельзя будет заказать. Фильтр опирается на состав, указанный кухней.
+              Блюда с исключёнными ингредиентами не попадут в подбор. В каталоге и корзине покажем предупреждение, но заказать их можно. Фильтр опирается на состав, указанный кухней.
             </p>
           </section>
 
@@ -182,11 +174,6 @@ export function PreferencesPage() {
               </Alert>
             </div>
           </section>
-          {removed.length > 0 && (
-            <Alert tone="warn" title="Корзина обновлена.">
-              Удалено из-за исключённых ингредиентов: {removed.join(', ')}. <Link to="/cart">Открыть корзину</Link>
-            </Alert>
-          )}
           {empty && (
             <div className="panel soft">
               <p className="small">

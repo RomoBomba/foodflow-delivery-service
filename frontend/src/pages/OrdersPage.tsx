@@ -1,4 +1,6 @@
-import { useState } from 'react';
+import { OrderStageTimer } from '../components/OrderStageTimer';
+import { formatElapsed, transitionDurations } from '../lib/orderTiming';
+import { useState, type ReactNode } from 'react';
 import { Link, useLocation, useParams } from 'react-router-dom';
 import { errorText, isApiError } from '../api/client';
 import { ordersApi } from '../api/endpoints';
@@ -33,7 +35,7 @@ export function OrdersPage() {
           <h1>Мои заказы</h1>
           <p className="sub">Новые сверху</p>
         </div>
-        <RefreshInfo seconds={seconds} failed={Boolean(orders.error) && Boolean(orders.data)} onRefresh={() => void orders.reload()} loading={orders.loading} />
+        <RefreshInfo timer={selected ? <OrderStageTimer order={selected} /> : undefined} seconds={seconds} failed={Boolean(orders.error) && Boolean(orders.data)} onRefresh={() => void orders.reload()} loading={orders.loading} />
       </div>
 
       {created && selected?.id === orderId && selected?.status === 'CREATED' && (
@@ -89,14 +91,15 @@ export function OrdersPage() {
   );
 }
 
-export function RefreshInfo({ seconds, failed, onRefresh, loading }: { seconds: number | null; failed: boolean; onRefresh: () => void; loading: boolean }) {
+export function RefreshInfo({ seconds, failed, onRefresh, loading, timer }: { timer?: ReactNode; seconds: number | null; failed: boolean; onRefresh: () => void; loading: boolean }) {
   return (
-    <div className="refresh" aria-live="polite">
-      <span className={`dot${failed ? ' off' : ''}`} aria-hidden="true" />
-      <span>
-        {seconds === null ? 'Обновляем…' : `Обновлено ${seconds} с назад`}
-      </span>
-      <button type="button" className="btn sm" onClick={onRefresh} disabled={loading}>↻ Обновить</button>
+    <div className="order-updates">
+      {timer}
+      <div className="refresh" aria-live="polite">
+        <span className={`dot${failed ? ' off' : ''}`} aria-hidden="true" />
+        <span>{seconds === null ? 'Обновляем…' : `Обновлено ${seconds} с назад`}</span>
+        <button type="button" className="btn sm" onClick={onRefresh} disabled={loading}>↻ Обновить</button>
+      </div>
     </div>
   );
 }
@@ -113,6 +116,7 @@ function MissingOrder({ orderId }: { orderId: string }) {
 function OrderDetail({ order, kitchen, onChanged }: { order: Order; kitchen?: string; onChanged: () => void }) {
   const toast = useToast();
   const [confirm, setConfirm] = useState(false);
+  const durations = transitionDurations(order.history);
   const [busy, setBusy] = useState(false);
   const stepIndex = ORDER_FLOW.indexOf(order.status);
   const historyTime = (status: string) => order.history.find((h) => h.toStatus === status)?.createdAt;
@@ -222,13 +226,14 @@ function OrderDetail({ order, kitchen, onChanged }: { order: Order; kitchen?: st
         <h2 id="history-title">История статусов</h2>
         <table className="responsive-table">
           <thead>
-            <tr><th>Время</th><th>Переход</th><th>Кто</th><th>Причина</th></tr>
+            <tr><th>Время</th><th>Переход</th><th>Длительность предыдущего этапа</th><th>Кто</th><th>Причина</th></tr>
           </thead>
           <tbody>
             {[...order.history].reverse().map((entry) => (
               <tr key={entry.id}>
                 <td>{formatTime(entry.createdAt)}</td>
                 <td>{entry.fromStatus ? ORDER_STATUS_LABEL[entry.fromStatus] : '—'} → {ORDER_STATUS_LABEL[entry.toStatus]}</td>
+                <td data-label="Длительность предыдущего этапа">{durations.has(entry.id) ? formatElapsed(durations.get(entry.id)!) : '—'}</td>
                 <td data-label="Кто">{entry.actorId === order.customerId ? 'Вы' : 'Кухня'}</td>
                 <td data-label="Причина" className={entry.reason ? '' : 'muted'}>{entry.reason ?? '—'}</td>
               </tr>

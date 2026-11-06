@@ -6,7 +6,7 @@ import type { Kitchen, KitchenApplication } from '../api/types';
 import { Alert, ErrorAlert, Field, KitchenStatusBadge, Loading, describe } from '../components/ui';
 import { formatDateTime } from '../lib/format';
 import { useAsync, useDocumentTitle } from '../lib/hooks';
-import { hasErrors, validateRequired, type FieldErrors } from '../lib/validation';
+import { hasErrors, validateContacts, validateRequired, type FieldErrors } from '../lib/validation';
 import { useAuth } from '../state/auth';
 
 const LIMITS: Record<keyof KitchenApplication, number> = { name: 120, description: 1000, contacts: 500, deliveryArea: 200 };
@@ -104,6 +104,7 @@ function ApplicationStatus({ kitchen }: { kitchen: Kitchen }) {
 function ApplicationForm({ onCreated }: { onCreated: (kitchen: Kitchen) => void }) {
   const [form, setForm] = useState<KitchenApplication>({ name: '', description: '', contacts: '', deliveryArea: '' });
   const [errors, setErrors] = useState<FieldErrors>({});
+  const [touched, setTouched] = useState(false);
   const [failure, setFailure] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
 
@@ -111,9 +112,10 @@ function ApplicationForm({ onCreated }: { onCreated: (kitchen: Kitchen) => void 
     event.preventDefault();
     const next: FieldErrors = {};
     (Object.keys(LIMITS) as (keyof KitchenApplication)[]).forEach((key) => {
-      const error = validateRequired(form[key], LIMITS[key], LABELS[key]);
+      const error = key === 'contacts' ? validateContacts(form.contacts) : validateRequired(form[key], LIMITS[key], LABELS[key]);
       if (error) next[key] = error;
     });
+    setTouched(true);
     setErrors(next);
     if (hasErrors(next)) return;
     setBusy(true);
@@ -134,13 +136,26 @@ function ApplicationForm({ onCreated }: { onCreated: (kitchen: Kitchen) => void 
     }
   };
 
+  const checkContacts = (value: string) => {
+    const error = validateContacts(value);
+    setErrors((previous) => {
+      const next = { ...previous };
+      if (error) next.contacts = error; else delete next.contacts;
+      return next;
+    });
+  };
+
   const input = (key: keyof KitchenApplication, area = false) => {
     const props = {
       className: 'input',
       maxLength: LIMITS[key],
       value: form[key],
       ...describe(`k-${key}`, errors[key], true),
-      onChange: (e: { target: { value: string } }) => setForm({ ...form, [key]: e.target.value }),
+      onChange: (e: { target: { value: string } }) => {
+        setForm({ ...form, [key]: e.target.value });
+        if (key === 'contacts' && touched) checkContacts(e.target.value);
+      },
+      onBlur: () => { if (key === 'contacts') { setTouched(true); checkContacts(form.contacts); } },
     };
     return area ? <textarea {...props} /> : <input {...props} />;
   };
@@ -149,7 +164,7 @@ function ApplicationForm({ onCreated }: { onCreated: (kitchen: Kitchen) => void 
     <form className="panel" onSubmit={submit} noValidate>
       <Field id="k-name" label="Название кухни *" error={errors.name} hint="до 120 символов">{input('name')}</Field>
       <Field id="k-description" label="Описание *" error={errors.description} hint="до 1000 символов">{input('description', true)}</Field>
-      <Field id="k-contacts" label="Контакты *" error={errors.contacts} hint="телефон, email — до 500 символов">{input('contacts')}</Field>
+      <Field id="k-contacts" label="Контакты *" error={errors.contacts} hint="телефон или email; несколько — через ;">{input('contacts')}</Field>
       <Field id="k-deliveryArea" label="Район доставки *" error={errors.deliveryArea} hint="до 200 символов">{input('deliveryArea')}</Field>
       <ErrorAlert error={failure} />
       <button type="submit" className="btn primary lg block mt-12" disabled={busy}>{busy ? 'Отправляем…' : 'Отправить заявку'}</button>

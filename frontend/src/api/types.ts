@@ -95,6 +95,8 @@ export interface PreferencesRequest {
 }
 
 export interface CartItem {
+  photoUrl: string | null;
+  excludedIngredients: string[];
   dishId: UUID;
   dishName: string;
   quantity: number;

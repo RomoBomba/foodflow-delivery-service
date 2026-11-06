@@ -36,6 +36,11 @@ public class KitchenService {
             );
         }
 
+        String contactError = com.foodflow.common.ContactValidation.contactsError(request.contacts());
+        if (contactError != null) {
+            throw new com.foodflow.common.ApiException(HttpStatus.BAD_REQUEST, "INVALID_CONTACTS", contactError,
+                    java.util.Map.of("fields", java.util.Map.of("contacts", contactError)));
+        }
         Kitchen kitchen = new Kitchen(ownerId, request);
 
         return KitchenResponse.from(

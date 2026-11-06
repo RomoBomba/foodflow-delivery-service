@@ -94,14 +94,12 @@ export function BuyButton({
   onAdd,
   size = 'sm',
   label = 'В корзину',
-  blockedReason,
 }: {
   dish: CatalogDish;
   busy: boolean;
   onAdd: () => void;
   size?: 'sm' | 'lg';
   label?: string;
-  blockedReason?: string | null;
 }) {
   const { user } = useAuth();
   const location = useLocation();
@@ -121,13 +119,7 @@ export function BuyButton({
       </Link>
     );
   }
-  if (blockedReason) {
-    return (
-      <button type="button" className={cls} disabled title={blockedReason}>
-        Нельзя заказать
-      </button>
-    );
-  }
+
   return (
     <button type="button" className={`${cls} primary`} disabled={busy} onClick={onAdd} aria-label={`Добавить «${dish.name}» в корзину`}>
       {busy ? 'Добавляем…' : label}

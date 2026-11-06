@@ -117,7 +117,7 @@ export function DishPage() {
           <div className="panel">
             <div className="price" style={{ fontSize: 30 }}>{formatMoney(d.price)}</div>
             <p className="small muted" style={{ margin: '4px 0 14px' }}>Доставка включена · оплата при получении</p>
-            {isClient && d.available && !incompatible && (
+            {isClient && d.available && (
               <div className="row" style={{ marginBottom: 14 }}>
                 <Stepper value={quantity} max={maxQuantity} onChange={setQuantity} label="Количество порций" />
                 <span className="small muted">до {maxQuantity} порций</span>
@@ -128,7 +128,6 @@ export function DishPage() {
               size="lg"
               label="Добавить в корзину"
               busy={busyId === d.id}
-              blockedReason={incompatible}
               onAdd={() => void add(d, quantity).then((ok) => ok && setQuantity(1))}
             />
             {isClient && (
@@ -137,8 +136,8 @@ export function DishPage() {
           </div>
 
           {incompatible && (
-            <Alert tone="danger" title="Блюдо вам не подходит.">
-              {incompatible}. Оно скрыто из вашего подбора, добавить его в корзину нельзя.{' '}
+            <Alert tone="warn" title="Есть исключённый ингредиент.">
+              {incompatible}. Оно скрыто из персонального подбора. Это предупреждение: вы можете заказать блюдо, например для другого человека.{' '}
               <Link to="/preferences">Изменить предпочтения</Link>
             </Alert>
           )}

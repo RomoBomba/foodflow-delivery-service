@@ -3,7 +3,6 @@ package com.foodflow.ordering;
 import com.foodflow.catalog.dish.Dish;
 import com.foodflow.catalog.CatalogQueryService;
 import com.foodflow.catalog.CatalogStockService;
-import com.foodflow.catalog.ingredient.Ingredient;
 import com.foodflow.catalog.kitchen.Kitchen;
 import com.foodflow.catalog.kitchen.KitchenStatus;
 import com.foodflow.common.ApiException;
@@ -61,7 +60,7 @@ public class CartService {
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "KITCHEN_NOT_FOUND", "Кухня не найдена"));
         Dish dish = stock.lockDish(request.dishId())
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "DISH_NOT_FOUND", "Блюдо не найдено"));
-        stock.ensurePurchasable(dish, kitchen, request.quantity(), preferenceQuery.excludedIngredients(userId));
+        stock.ensurePurchasable(dish, kitchen, request.quantity());
 
         if (cart.getKitchenId() != null && !cart.getKitchenId().equals(kitchen.getId())) {
             if (!request.confirmReplaceKitchen()) {
@@ -82,7 +81,7 @@ public class CartService {
             if (updatedQuantity > 99) {
                 throw new ApiException(HttpStatus.BAD_REQUEST, "CART_QUANTITY_LIMIT", "В корзине допускается не более 99 порций одного блюда");
             }
-            stock.ensurePurchasable(dish, kitchen, updatedQuantity, preferenceQuery.excludedIngredients(userId));
+            stock.ensurePurchasable(dish, kitchen, updatedQuantity);
             existing.setQuantity(updatedQuantity);
         } else {
             if (itemRepository.findAllByCartIdOrderByDishIdAsc(cart.getId()).size() >= 30) {
@@ -106,7 +105,7 @@ public class CartService {
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "KITCHEN_NOT_FOUND", "Кухня не найдена"));
         Dish dish = stock.lockDish(dishId)
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "DISH_NOT_FOUND", "Блюдо не найдено"));
-        stock.ensurePurchasable(dish, kitchen, quantity, preferenceQuery.excludedIngredients(userId));
+        stock.ensurePurchasable(dish, kitchen, quantity);
         item.setQuantity(quantity);
         cart.touch();
         return toResponse(cart);
@@ -134,12 +133,6 @@ public class CartService {
         cart.touch();
     }
 
-    @Transactional
-    public void lockForPreferenceUpdate(UUID userId) {
-        // Lock before reading/writing preferences, including for a previously absent cart.
-        getOrCreateLockedCart(userId);
-    }
-
     private Cart getOrCreateLockedCart(UUID userId) {
         Cart cart = cartRepository.findByUserIdForUpdate(userId).orElse(null);
         if (cart == null) {
@@ -148,25 +141,6 @@ public class CartService {
             if (cart == null) cart = cartRepository.saveAndFlush(new Cart(userId));
         }
         return cart;
-    }
-
-    @Transactional
-    public void removeIncompatibleItems(UUID userId, java.util.Set<UUID> excludedIngredientIds) {
-        if (excludedIngredientIds == null || excludedIngredientIds.isEmpty()) return;
-        cartRepository.findByUserIdForUpdate(userId).ifPresent(cart -> {
-            for (CartItem item : itemRepository.findAllByCartIdOrderByDishIdAsc(cart.getId())) {
-                catalog.findDish(item.getDishId()).ifPresent(dish -> {
-                    boolean incompatible = dish.getIngredients().stream()
-                            .map(Ingredient::getId)
-                            .anyMatch(excludedIngredientIds::contains);
-                    if (incompatible) itemRepository.delete(item);
-                });
-            }
-            if (itemRepository.findAllByCartIdOrderByDishIdAsc(cart.getId()).isEmpty()) {
-                cart.setKitchenId(null);
-            }
-            cart.touch();
-        });
     }
 
     private Cart getLockedCart(UUID userId) {
@@ -178,6 +152,7 @@ public class CartService {
         List<CartItemResponse> items = new ArrayList<>();
         BigDecimal total = BigDecimal.ZERO;
         boolean changed = false;
+        var excluded = preferenceQuery.excludedIngredients(cart.getUserId());
         for (CartItem item : itemRepository.findAllByCartIdOrderByDishIdAsc(cart.getId())) {
             Dish dish = catalog.findDish(item.getDishId()).orElse(null);
             if (dish == null) continue;
@@ -193,7 +168,9 @@ public class CartService {
             total = total.add(lineTotal);
             items.add(new CartItemResponse(
                     dish.getId(), dish.getName(), item.getQuantity(), item.getPriceAtAdd(),
-                    dish.getPrice(), lineTotal, priceChanged, dish.getAvailablePortions(), available
+                    dish.getPrice(), lineTotal, priceChanged, dish.getAvailablePortions(), available,
+                    dish.getPhotoUrl(), dish.getIngredients().stream().filter(ingredient -> excluded.contains(ingredient.getId()))
+                            .map(ingredient -> ingredient.getName()).sorted().toList()
             ));
         }
         return new CartResponse(cart.getId(), cart.getKitchenId(), items, total, changed, cart.getUpdatedAt());

@@ -7,7 +7,6 @@ import com.foodflow.catalog.kitchen.Kitchen;
 import com.foodflow.catalog.kitchen.KitchenStatus;
 import com.foodflow.common.ApiException;
 import com.foodflow.identity.IdentityQueryService;
-import com.foodflow.recommendation.PreferenceQueryService;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -35,7 +34,6 @@ public class OrderService {
     private final CartItemRepository cartItemRepository;
     private final CatalogQueryService catalog;
     private final CatalogStockService stock;
-    private final PreferenceQueryService preferenceQuery;
     private final IdentityQueryService identityQueryService;
 
     public OrderService(
@@ -47,7 +45,6 @@ public class OrderService {
             CartItemRepository cartItemRepository,
             CatalogQueryService catalog,
             CatalogStockService stock,
-            PreferenceQueryService preferenceQuery,
             IdentityQueryService identityQueryService
     ) {
         this.reservations = reservations;
@@ -58,7 +55,6 @@ public class OrderService {
         this.cartItemRepository = cartItemRepository;
         this.catalog = catalog;
         this.stock = stock;
-        this.preferenceQuery = preferenceQuery;
         this.identityQueryService = identityQueryService;
     }
 
@@ -91,14 +87,13 @@ public class OrderService {
             throw new ApiException(HttpStatus.CONFLICT, "KITCHEN_CLOSED", "Кухня не принимает новые заказы");
         }
 
-        var excluded = preferenceQuery.excludedIngredients(customerId);
         List<Dish> lockedDishes = new ArrayList<>();
         Map<UUID, CartItem> cartItemByDish = cartItems.stream()
                 .collect(Collectors.toMap(CartItem::getDishId, item -> item));
         for (CartItem cartItem : cartItems) {
             Dish dish = stock.lockDish(cartItem.getDishId())
                     .orElseThrow(() -> new ApiException(HttpStatus.CONFLICT, "DISH_UNAVAILABLE", "Одно из блюд больше недоступно"));
-            stock.ensurePurchasable(dish, kitchen, cartItem.getQuantity(), excluded);
+            stock.ensurePurchasable(dish, kitchen, cartItem.getQuantity());
             lockedDishes.add(dish);
         }
 
@@ -249,13 +244,8 @@ public class OrderService {
     }
 
     private void validatePhone(String phone) {
-        long digits = phone == null ? 0 : phone.chars().filter(c -> c >= '0' && c <= '9').count();
-        if (phone == null || digits < 10 || digits > 15 || !phone.matches("[0-9+() -]+")) {
-            throw new ApiException(HttpStatus.BAD_REQUEST, "INVALID_PHONE", "Телефон должен содержать от 10 до 15 цифр");
-        }
-        if (normalizePhone(phone).chars().distinct().count() == 1) {
-            throw new ApiException(HttpStatus.BAD_REQUEST, "INVALID_PHONE", "Номер не может состоять из одной повторяющейся цифры");
-        }
+        String error = com.foodflow.common.ContactValidation.phoneError(phone);
+        if (error != null) throw new ApiException(HttpStatus.BAD_REQUEST, "INVALID_PHONE", error);
     }
 
     private void validateAddress(String address) {

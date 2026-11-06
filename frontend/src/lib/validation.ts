@@ -85,3 +85,14 @@ export function newIdempotencyKey(): string {
 export function isValidIdempotencyKey(key: string): boolean {
   return /^[A-Za-z0-9._:-]{8,128}$/.test(key);
 }
+
+/** Один или несколько телефонов/email; свободный текст не считается контактом. */
+export function validateContacts(value: string): string | null {
+  if (!value.trim() || value.length > 500) return 'Укажите телефон или email, не больше 500 символов';
+  for (const part of value.split(/[;,\n]/)) {
+    const contact = part.trim();
+    const error = contact.includes('@') ? validateEmail(contact) : validatePhone(contact);
+    if (error) return 'Укажите корректный телефон или email; несколько контактов разделяйте точкой с запятой';
+  }
+  return null;
+}

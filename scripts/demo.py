@@ -85,7 +85,7 @@ def seed(base, admin_email, admin_password, demo_password, smoke):
                 raise
             info = kitchen.call("POST", "/api/kitchens", {
                 "name": f"Демо кухня {index}", "description": "Учебные демонстрационные данные",
-                "contacts": "Контакты учебной кухни", "deliveryArea": "Санкт-Петербург, учебный район"})
+                "contacts": f"kitchen{index}@demo.test", "deliveryArea": "Санкт-Петербург, учебный район"})
         if info["status"] == "PENDING":
             admin.call("POST", f"/api/admin/kitchens/{info['id']}/approve")
             kitchen.login(f"kitchen{index}@demo.test", demo_password)

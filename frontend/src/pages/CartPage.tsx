@@ -162,7 +162,7 @@ export function CartPage() {
         return;
       }
       default:
-        if (['CART_CHANGED', 'CART_EMPTY', 'INSUFFICIENT_STOCK', 'DISH_UNAVAILABLE', 'KITCHEN_CLOSED', 'EXCLUDED_INGREDIENT', 'DISH_ARCHIVED'].includes(error.code)) {
+        if (['CART_CHANGED', 'CART_EMPTY', 'INSUFFICIENT_STOCK', 'DISH_UNAVAILABLE', 'KITCHEN_CLOSED', 'DISH_ARCHIVED'].includes(error.code)) {
           void cart.refresh().catch(() => undefined);
         }
         setSubmitError(error);
@@ -278,9 +278,10 @@ export function CartPage() {
           <section className="panel" aria-label="Позиции корзины">
             {items.map((item) => (
               <div className="cart-item" key={item.dishId}>
-                <DishPhoto url={null} name={item.dishName} />
+                <DishPhoto url={item.photoUrl} name={item.dishName} />
                 <div style={{ minWidth: 0 }}>
                   <Link className="strong" to={`/dishes/${item.dishId}`} style={{ color: 'var(--text)' }}>{item.dishName}</Link>
+                  {item.excludedIngredients.length > 0 && <p className="tiny preference-warning">В составе есть исключённые вами ингредиенты: {item.excludedIngredients.join(', ')}. Это предупреждение — блюдо можно заказать, например для другого человека.</p>}
                   <div className="small">
                     {item.priceChanged ? (
                       <>
