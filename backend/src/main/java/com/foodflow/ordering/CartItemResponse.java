@@ -2,6 +2,7 @@ package com.foodflow.ordering;
 
 import java.math.BigDecimal;
 import java.util.UUID;
+import java.util.List;
 
 public record CartItemResponse(
         UUID dishId,
@@ -12,5 +13,7 @@ public record CartItemResponse(
         BigDecimal lineTotal,
         boolean priceChanged,
         int availablePortions,
-        boolean available
+        boolean available,
+        String photoUrl,
+        List<String> excludedIngredients
 ) { }

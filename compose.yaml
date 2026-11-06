@@ -1,6 +1,6 @@
 services:
   nginx:
-    image: nginx:stable-alpine
+    build: ./frontend
     ports:
       - "${HTTPS_BIND:-0.0.0.0}:${HTTPS_PORT:-443}:443"
     volumes:
@@ -8,12 +8,6 @@ services:
       - type: bind
         source: ${TLS_CERT_DIR:-./.local/tls}
         target: /etc/nginx/tls
-        read_only: true
-        bind:
-          create_host_path: false
-      - type: bind
-        source: ${FRONTEND_DIST:-./frontend/dist}
-        target: /usr/share/nginx/html
         read_only: true
         bind:
           create_host_path: false

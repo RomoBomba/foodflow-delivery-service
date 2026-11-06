@@ -1,4 +1,4 @@
-# HTTP API FoodFlow для frontend
+# HTTP API FoodFlow
 
 Базовый адрес локального backend — `http://localhost:8080`. UUID передаются строками. Даты — ISO 8601 UTC. Денежные поля JSON — числа в рублях; итог рассчитывает сервер. Пользовательские тексты следует выводить как текст, без `dangerouslySetInnerHTML`.
 
@@ -34,7 +34,7 @@ Cookie `JSESSIONID`: HttpOnly, SameSite=Lax, Secure на HTTPS-стенде; н�
 | POST | `/api/admin/kitchens/{id}/reject` | ADMIN; `{reason:"..."}` |
 | POST | `/api/admin/kitchens/{id}/block` | ADMIN; `{reason:"..."}` |
 
-Заявка: `{name,description,contacts,deliveryArea}`. Ограничения длины: 120/1000/500/200; поля обязательны. Статусы кухни: PENDING, APPROVED, REJECTED, BLOCKED.
+Заявка: `{name,description,contacts,deliveryArea}`. Ограничения длины: 120/1000/500/200; поля обязательны. `contacts` содержит телефон или email; несколько контактов разделяются `;`, запятой или переводом строки. Каждый контакт проверяется; телефон — по правилам оформления заказа, email — до 254 символов. Ошибка: `400 INVALID_CONTACTS` с `fields.contacts`. Статусы кухни: PENDING, APPROVED, REJECTED, BLOCKED.
 
 Создание и PUT блюда принимают:
 
@@ -54,7 +54,7 @@ Cookie `JSESSIONID`: HttpOnly, SameSite=Lax, Secure на HTTPS-стенде; н�
 
 Состав содержит 1–50 ингредиентов. Название ≤120, описание ≤1000, фото ≤2048 символов и только http/https. Цена положительная, до 10 цифр перед точкой и 2 после; масса — положительное целое, ккал и порции — неотрицательные целые. Пустой URL заменяйте `null`. Архивное блюдо нельзя редактировать.
 
-Фильтры каталога: `kitchenId`, `categoryId`, `minPrice`, `maxPrice`, `availableOnly=false`. Пагинация: `page=0`, `size=20`, максимум 100. `sort=priceAsc|priceDesc|relevance`; `score` — алиас `relevance`. Персональная сортировка требует сессии CLIENT; без неё 401. При пустом профиле персональная сортировка использует обычный порядок по цене. Несовместимые блюда исключаются из персональной выдачи, но могут быть в обычном каталоге.
+Фильтры каталога: `kitchenId`, `categoryId`, `minPrice`, `maxPrice`, `availableOnly=false`. Пагинация: `page=0`, `size=20`, максимум 100. `sort=priceAsc|priceDesc|relevance`; `score` — алиас `relevance`. Персональная сортировка требует сессии CLIENT; без неё 401. При пустом профиле персональная сортировка использует обычный порядок по цене. Несовместимые блюда исключаются из персональной выдачи, но могут быть в обычном каталоге. Блокировка кухни запрещает новые заказы и выключает их приём; обработка существующих заказов сохраняется.
 
 Карточка содержит `id,kitchenId,kitchenName,name,description,category,ingredients,price,weightGrams,kcalPerPortion,availablePortions,available,photoUrl,averageRating,reviewCount,repeatOrderPercent,repeatOrderResponses`. Категория и ингредиенты — объекты `{id,name}`. При отсутствии отзывов `averageRating` и `repeatOrderPercent` равны `null`, счётчики — 0. `available=false` не обязательно скрывает блюдо из обычного каталога.
 
@@ -72,11 +72,13 @@ CLIENT: `GET/PUT /api/preferences`. PUT заменяет профиль:
 }
 ```
 
-В каждом списке до 100 UUID. Пропущенные списки трактуются как пустые. Ответ содержит эти поля, `userId` и `updatedAt`. Исключённые блюда удаляются из текущей корзины в той же транзакции. После успешного PUT обновите отображение корзины.
+В каждом списке до 100 UUID. Любимые и исключённые ингредиенты не пересекаются; `kcalMin` не превышает `kcalMax`. Пропущенные списки трактуются как пустые. Ответ содержит эти поля, `userId` и `updatedAt`. Содержимое корзины сохраняется; меняются предупреждения об исключённых ингредиентах. После успешного PUT обновите отображение корзины.
 
-`GET /api/recommendations?page=0&size=20` возвращает `{scoringEnabled,page,size,totalElements,totalPages,message,content}`. Элемент `content`: `{dish,score,explanation}`; `dish` — карточка каталога, `explanation` — массив строк. При пустом профиле `score=null`. Балл 0–100, веса 50/30/20 нормируются по активным критериям, при равенстве порядок задаётся ID.
+`GET /api/recommendations?page=0&size=20` возвращает `{scoringEnabled,page,size,totalElements,totalPages,message,content}`. Элемент `content`: `{dish,score,explanation}`; `dish` — карточка каталога, `explanation` — массив строк. Необязательный `dishIds` — до 100 UUID через запятую — ограничивает подбор указанными блюдами до пагинации; используется для баллов текущей страницы каталога. Исключённые ингредиенты ограничивают только персональную выдачу. При пустом профиле `score=null`. Балл 0–100: веса категории / доли любимых ингредиентов / калорийности — 50/30/20, нормируются по заполненным критериям. Округление — половина вверх, при равенстве порядок задаётся ID. Рейтинг отзывов в формуле не участвует.
 
 `GET /api/recommendations/dishes/{dishId}/compatibility` возвращает `{dishId,compatible,reason,excludedIngredientId}`. Для скрытого из каталога блюда — 404. Причина нужна для показа несовместимости при открытии карточки по прямой ссылке.
+
+**Уточнение ТЗ от 06.11.2026:** вместо жёсткого запрета покупки исключённые ингредиенты вызывают предупреждение. Добавление, изменение количества и оформление разрешены, в том числе для другого получателя.
 
 ## Корзина
 
@@ -90,9 +92,9 @@ CLIENT: `GET/PUT /api/preferences`. PUT заменяет профиль:
 | DELETE | `/api/cart/items/{dishId}` | Обновлённая корзина, 200 |
 | DELETE | `/api/cart` | Очистка, 204 |
 
-POST **прибавляет** количество; PATCH **задаёт** его. Количество — целое 1–99. `confirmReplaceKitchen` можно опустить; по умолчанию false. При `409 CART_KITCHEN_MISMATCH` покажите подтверждение очистки и только затем повторите с true. При ошибке прежняя корзина сохраняется. POST корзины не является идемпотентным: после сетевой ошибки сначала перечитайте корзину, не повторяйте добавление автоматически.
+POST **прибавляет** количество; PATCH **задаёт** его. До 30 разных блюд одной кухни; количество — целое 1–99. Корзина хранится в БД, порции не резервирует. `confirmReplaceKitchen` можно опустить; по умолчанию false. При `409 CART_KITCHEN_MISMATCH` покажите подтверждение очистки и только затем повторите с true. При ошибке прежняя корзина сохраняется. POST корзины не является идемпотентным: после сетевой ошибки сначала перечитайте корзину, не повторяйте добавление автоматически.
 
-Ответ: `{id,kitchenId,items,totalPrice,hasPriceChanges,updatedAt}`. Элемент: `{dishId,dishName,quantity,priceAtAdd,currentPrice,lineTotal,priceChanged,availablePortions,available}`. `totalPrice` использует актуальные цены. Старая цена нужна для проверки при оформлении; изменение количества её не подтверждает.
+Ответ: `{id,kitchenId,items,totalPrice,hasPriceChanges,updatedAt}`. Элемент: `{dishId,dishName,quantity,priceAtAdd,currentPrice,lineTotal,priceChanged,availablePortions,available,photoUrl,excludedIngredients}`. `photoUrl` — актуальный URL фотографии или null; `excludedIngredients` — имена исключённых клиентом ингредиентов, пустой массив при отсутствии конфликтов. Это предупреждение, оно не делает `available=false`. `totalPrice` использует актуальные цены. Старая цена нужна для проверки при оформлении; изменение количества её не подтверждает.
 
 ## Оформление, повтор и цены
 
@@ -109,13 +111,13 @@ POST **прибавляет** количество; PATCH **задаёт** ег�
 }
 ```
 
-Адрес 10–500 символов после удаления краевых пробелов; телефон содержит 10–15 цифр, допустимы `+() -`, общая длина ≤25; комментарий ≤500. Позиции должны совпасть с корзиной, дубликаты запрещены. `acceptCurrentPrices` можно опустить. Клиентскую сумму сервер не использует.
+Адрес 10–500 символов после удаления краевых пробелов; телефон содержит 10–15 цифр, допустимы `+() -`, общая длина ≤25; номера из одной повторяющейся цифры отклоняются; комментарий ≤500. Позиции должны совпасть с корзиной, дубликаты запрещены. `acceptCurrentPrices` можно опустить. Клиентскую сумму сервер не использует.
 
 При `409 PRICE_CHANGED` ответ содержит `code,message,updatedTotal,updatedPriceFingerprint,items`. Элементы `items`: `{dishId,dishName,quantity,previousUnitPrice,currentUnitPrice,currentLineTotal}` — только изменившиеся позиции. После явного согласия отправьте `acceptCurrentPrices:true` и `confirmedPriceFingerprint` из **последнего** расчёта. Если цены поменялись снова, сервер вернёт новый 409. Не подтверждайте его автоматически.
 
-Первое успешное оформление возвращает **201**, успешный повтор — **200 с тем же заказом**. После сетевой ошибки повторите тот же ключ и то же тело. Не генерируйте новый ключ, пока исход предыдущей попытки неизвестен. После успешно созданного заказа изменение реквизитов, позиций или полей подтверждения с тем же ключом даёт `409 IDEMPOTENCY_KEY_REUSED`. После бизнес-отказа, при котором заказ не создан, ключ можно использовать для исправленного запроса.
+Первое успешное оформление возвращает **201**, успешный повтор — **200 с тем же заказом**. После сетевой ошибки, обрыва ответа или 5xx исход оформления может быть неизвестен: сохраните ключ и тело до отправки, затем повторите их без изменений. Возможность такого повтора должна сохраняться после перезагрузки даже при пустой корзине. Черновики и попытки в браузере храните отдельно для каждого пользователя. Не генерируйте новый ключ, пока исход предыдущей попытки неизвестен. После успешно созданного заказа изменение реквизитов, позиций или полей подтверждения с тем же ключом даёт `409 IDEMPOTENCY_KEY_REUSED`. После бизнес-отказа, при котором заказ не создан, ключ можно использовать для исправленного запроса.
 
-Заказ: `{id,orderNumber,customerId,kitchenId,deliveryAddress,phone,paymentMethod,comment,status,version,totalPrice,cancellationReason,createdAt,updatedAt,items,history}`. `paymentMethod=CASH_ON_DELIVERY`; `orderNumber` сейчас совпадает с UUID. Позиция: `{id,dishId,dishName,unitPrice,quantity,lineTotal,weightGrams,kcalPerPortion}`. История: `{id,fromStatus,toStatus,actorId,reason,createdAt}`. Снимки позиций не меняются при редактировании меню.
+Заказ: `{id,orderNumber,customerId,kitchenId,deliveryAddress,phone,paymentMethod,comment,status,version,totalPrice,cancellationReason,createdAt,updatedAt,items,history}`. `paymentMethod=CASH_ON_DELIVERY`; `orderNumber` сейчас совпадает с UUID. Позиция: `{id,dishId,dishName,unitPrice,quantity,lineTotal,weightGrams,kcalPerPortion}`. История: `{id,fromStatus,toStatus,actorId,reason,createdAt}`. Снимки позиций не меняются при редактировании меню. Каждая позиция имеет резерв `Reservation`: ACTIVE при оформлении, RELEASED при отмене, CONSUMED при выполнении. Остаток уменьшается при оформлении и возвращается только при отмене; заказ, резерв и очистка корзины сохраняются одной транзакцией.
 
 | Метод | URL | Доступ / тело |
 | --- | --- | --- |
@@ -143,6 +145,7 @@ POST **прибавляет** количество; PATCH **задаёт** ег�
 
 От 1 до 30 позиций, оценка — целое 1–5, `reordered` обязателен, текст необязателен и ≤1000 символов. Только свой COMPLETED-заказ; один отзыв на позицию. Скрытие не разрешает оставлять повторный отзыв.
 
+- `GET /api/orders/{orderId}/reviews` — CLIENT, свои отзывы этого заказа, включая скрытые и причину модерации; чужой заказ — 404. Используйте для отметки уже оценённых позиций.
 - `GET /api/dishes/{dishId}/reviews` — публичные видимые отзывы.
 - `GET /api/kitchens/me/reviews` — видимые отзывы на блюда своей кухни.
 - `GET /api/admin/reviews?visible=true|false` — ADMIN, без фильтра все.
@@ -154,4 +157,4 @@ POST **прибавляет** количество; PATCH **задаёт** ег�
 
 400 — неверные поля, JSON или параметры; 401 — нужен вход; 403 — роль или CSRF; 404 — объект отсутствует либо чужой; 409 — бизнес-конфликт. Ошибки прикладных контроллеров содержат `code,message`, иногда `fields` или дополнительные поля расчёта. Spring Security возвращает тот же формат: 401 — `AUTHENTICATION_REQUIRED`, 403 — `ACCESS_DENIED`. При 401 откройте вход; при 403 проверьте актуальность CSRF и доступную роль. Сетевые ошибки и ответы прокси могут не содержать JSON. `X-Request-ID` позволяет сопоставить ответ с журналом, включая отказы Security.
 
-Основные коды для корзины/заказов: `CART_EMPTY`, `CART_CHANGED`, `CART_KITCHEN_MISMATCH`, `CART_ITEMS_LIMIT`, `CART_QUANTITY_LIMIT`, `KITCHEN_CLOSED`, `DISH_ARCHIVED`, `DISH_UNAVAILABLE`, `INSUFFICIENT_STOCK`, `EXCLUDED_INGREDIENT`, `PRICE_CHANGED`, `IDEMPOTENCY_KEY_REUSED`, `ORDER_NOT_CANCELLABLE`, `ORDER_VERSION_CONFLICT`, `INVALID_ORDER_TRANSITION`. Для отзывов: `ORDER_NOT_COMPLETED`, `REVIEW_ALREADY_EXISTS`, `REVIEW_ITEM_NOT_IN_ORDER`, `REVIEW_ALREADY_HIDDEN`. Некорректный JSON, заголовки и типы параметров: `INVALID_REQUEST`; ошибки DTO: `VALIDATION_ERROR` с `fields`.
+Основные коды для корзины/заказов: `CART_EMPTY`, `CART_CHANGED`, `CART_KITCHEN_MISMATCH`, `CART_ITEMS_LIMIT`, `CART_QUANTITY_LIMIT`, `KITCHEN_CLOSED`, `DISH_ARCHIVED`, `DISH_UNAVAILABLE`, `INSUFFICIENT_STOCK`, `PRICE_CHANGED`, `IDEMPOTENCY_KEY_REUSED`, `ORDER_NOT_CANCELLABLE`, `ORDER_VERSION_CONFLICT`, `INVALID_ORDER_TRANSITION`. Для отзывов: `ORDER_NOT_COMPLETED`, `REVIEW_ALREADY_EXISTS`, `REVIEW_ITEM_NOT_IN_ORDER`, `REVIEW_ALREADY_HIDDEN`. Некорректный JSON, заголовки и типы параметров: `INVALID_REQUEST`; ошибки DTO: `VALIDATION_ERROR` с `fields`.

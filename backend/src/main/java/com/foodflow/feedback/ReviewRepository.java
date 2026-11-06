@@ -15,6 +15,8 @@ public interface ReviewRepository extends JpaRepository<Review, UUID> {
     @Query("select r from Review r where r.id = :id")
     Optional<Review> findByIdForUpdate(@Param("id") UUID id);
 
+    List<Review> findAllByOrderIdAndUserIdOrderByCreatedAtDesc(UUID orderId, UUID userId);
+
     boolean existsByOrderItemId(UUID orderItemId);
     List<Review> findAllByDishIdAndStatusOrderByCreatedAtDesc(UUID dishId, ReviewStatus status);
     List<Review> findAllByDishIdInAndStatusOrderByCreatedAtDesc(List<UUID> dishIds, ReviewStatus status);

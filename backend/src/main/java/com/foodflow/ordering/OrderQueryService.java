@@ -17,6 +17,13 @@ public class OrderQueryService {
         this.items = items;
     }
 
+    @Transactional(readOnly = true)
+    public void requireOwnedOrder(UUID orderId, UUID userId) {
+        if (orders.findByIdAndCustomerId(orderId, userId).isEmpty()) {
+            throw new ApiException(HttpStatus.NOT_FOUND, "ORDER_NOT_FOUND", "Заказ не найден");
+        }
+    }
+
     @Transactional(propagation = Propagation.MANDATORY)
     public List<OrderItem> completedItemsForReview(UUID orderId, UUID userId) {
         CustomerOrder order = orders.findByIdAndCustomerForUpdate(orderId, userId)

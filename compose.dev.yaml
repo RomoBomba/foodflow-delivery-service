@@ -1,8 +1,12 @@
-# Local HTTP development: no frontend build or TLS certificate required.
+# Local HTTP: frontend + backend + PostgreSQL, no TLS certificate required.
+# Requires Docker Compose 2.24.4+ (!override).
 # docker compose -f compose.yaml -f compose.dev.yaml up --build -d
 services:
   nginx:
-    profiles: [https]
+    ports: !override
+      - "127.0.0.1:3000:80"
+    volumes: !override
+      - ./frontend/nginx.conf:/etc/nginx/conf.d/default.conf:ro
   backend:
     environment:
       SESSION_COOKIE_SECURE: "false"

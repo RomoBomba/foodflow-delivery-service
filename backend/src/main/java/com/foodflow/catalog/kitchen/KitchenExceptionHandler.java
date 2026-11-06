@@ -17,6 +17,16 @@ import java.util.Map;
 })
 public class KitchenExceptionHandler {
 
+    @ExceptionHandler(com.foodflow.common.ApiException.class)
+    public ResponseEntity<Map<String, Object>> handleApi(com.foodflow.common.ApiException exception) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("code", exception.getCode());
+        body.put("message", exception.getMessage());
+        body.putAll(exception.getDetails());
+        return ResponseEntity.status(exception.getStatus()).body(body);
+    }
+
+
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<?> handleValidation(
             MethodArgumentNotValidException exception

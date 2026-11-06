@@ -12,7 +12,6 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 import java.util.UUID;
 
 /** Participates in the caller's cart/order transaction; never commits stock independently. */
@@ -30,7 +29,7 @@ public class CatalogStockService {
     public Optional<Kitchen> lockKitchen(UUID id) { return kitchens.findByIdForUpdate(id); }
     public Optional<Dish> lockDish(UUID id) { return dishes.findByIdForUpdate(id); }
 
-    public void ensurePurchasable(Dish dish, Kitchen kitchen, int quantity, Set<UUID> excluded) {
+    public void ensurePurchasable(Dish dish, Kitchen kitchen, int quantity) {
         if (dish.isArchived()) throw new ApiException(HttpStatus.CONFLICT, "DISH_ARCHIVED", "Архивное блюдо нельзя заказать");
         if (kitchen.getStatus() != KitchenStatus.APPROVED || !kitchen.isAcceptingOrders()) {
             throw new ApiException(HttpStatus.CONFLICT, "KITCHEN_CLOSED", "Кухня сейчас не принимает заказы");
@@ -42,10 +41,7 @@ public class CatalogStockService {
             throw new ApiException(HttpStatus.CONFLICT, "INSUFFICIENT_STOCK", "Недостаточно свободных порций",
                     Map.of("dishId", dish.getId(), "availablePortions", dish.getAvailablePortions()));
         }
-        dish.getIngredients().stream().filter(item -> excluded.contains(item.getId())).findFirst().ifPresent(item -> {
-            throw new ApiException(HttpStatus.CONFLICT, "EXCLUDED_INGREDIENT", "Блюдо содержит исключённый ингредиент",
-                    Map.of("dishId", dish.getId(), "ingredientId", item.getId()));
-        });
+
     }
 
     public void reserve(UUID dishId, int quantity) {

@@ -3,7 +3,6 @@ package com.foodflow.recommendation;
 import com.foodflow.catalog.CatalogQueryService;
 import com.foodflow.common.ApiException;
 import com.foodflow.identity.IdentityQueryService;
-import com.foodflow.ordering.CartService;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -16,18 +15,15 @@ public class PreferenceService {
     private final PreferenceRepository repository;
     private final CatalogQueryService catalog;
     private final IdentityQueryService identityQueryService;
-    private final CartService cartService;
 
     public PreferenceService(
             PreferenceRepository repository,
             CatalogQueryService catalog,
-            IdentityQueryService identityQueryService,
-            CartService cartService
+            IdentityQueryService identityQueryService
     ) {
         this.repository = repository;
         this.catalog = catalog;
         this.identityQueryService = identityQueryService;
-        this.cartService = cartService;
     }
 
     @Transactional(readOnly = true)
@@ -64,7 +60,7 @@ public class PreferenceService {
             throw new ApiException(HttpStatus.BAD_REQUEST, "UNKNOWN_INGREDIENT", "Один или несколько ингредиентов не найдены");
         }
 
-        cartService.lockForPreferenceUpdate(userId);
+        identityQueryService.lockUser(userId);
         Preference preference = repository.findById(userId).orElseGet(() -> new Preference(userId));
         preference.update(
                 request.favoriteCategoryIds(),
@@ -74,8 +70,6 @@ public class PreferenceService {
                 request.kcalMax()
         );
         Preference saved = repository.save(preference);
-        // FR-10: re-check existing cart contents immediately after stop ingredients change.
-        cartService.removeIncompatibleItems(userId, request.excludedIngredientIds());
         return PreferenceResponse.from(saved);
     }
 }

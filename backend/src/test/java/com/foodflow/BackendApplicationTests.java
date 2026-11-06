@@ -391,34 +391,43 @@ class BackendApplicationTests {
     }
 
     @Test
-    void excludedIngredientsRemoveCartItemsAndBlockPurchases() {
+    void excludedIngredientsWarnButKeepCartAndAllowOrders() {
+        jdbc.update("UPDATE dishes SET photo_url = ? WHERE id = ?", "https://example.test/dish.jpg", dishId);
         carts.add(CLIENT, new CartItemRequest(dishId, 1, false));
         preferences.update(CLIENT, new PreferenceRequest(Set.of(), Set.of(), Set.of(ingredientId), null, null));
-        assertThat(carts.get(CLIENT).items()).isEmpty();
-        conflict("EXCLUDED_INGREDIENT", () -> carts.add(CLIENT, new CartItemRequest(dishId, 1, false)));
+        var item = carts.get(CLIENT).items().getFirst();
+        assertThat(item.photoUrl()).isEqualTo("https://example.test/dish.jpg");
+        assertThat(item.excludedIngredients()).hasSize(1);
+        assertThat(item.available()).isTrue();
+        carts.add(CLIENT, new CartItemRequest(dishId, 1, false));
+        carts.updateQuantity(CLIENT, dishId, 1);
         assertThat(recommendations.checkCompatibility(CLIENT, dishId).compatible()).isFalse();
         assertThat(recommendations.recommend(CLIENT, 0, 20).content()).isEmpty();
-        // A stale or externally restored cart is revalidated at checkout too.
-        UUID cartId = carts.get(CLIENT).id();
-        jdbc.update("UPDATE carts SET kitchen_id = ? WHERE id = ?", kitchenId, cartId);
-        jdbc.update("INSERT INTO cart_items VALUES (?, ?, ?, 1, 100)", UUID.randomUUID(), cartId, dishId);
-        conflict("EXCLUDED_INGREDIENT", () -> create(CLIENT, "excluded-key", request(dishId)));
+        preferences.update(CLIENT, new PreferenceRequest(Set.of(), Set.of(), Set.of(), null, null));
+        assertThat(carts.get(CLIENT).items().getFirst().excludedIngredients()).isEmpty();
+        preferences.update(CLIENT, new PreferenceRequest(Set.of(), Set.of(), Set.of(ingredientId), null, null));
+        int previousStock = stock();
+        var order = create(CLIENT, "excluded-key", request(dishId));
+        assertThat(order.status()).isEqualTo(OrderStatus.CREATED);
+        assertThat(stock()).isEqualTo(previousStock - 1);
+        assertThat(reservationStatus(order)).isEqualTo("ACTIVE");
     }
 
     @Test
-    void preferenceChangeWaitsForCartAndRechecksNewlyAddedItems() throws Exception {
+    void preferenceChangeKeepsConcurrentlyAddedItemsAndUpdatesWarnings() throws Exception {
         carts.add(CLIENT, new CartItemRequest(dishId, 1, false));
         try (var executor = Executors.newSingleThreadExecutor()) {
             Future<PreferenceResponse> pending = transaction(() -> {
                 jdbc.queryForObject("SELECT id FROM carts WHERE user_id = ? FOR UPDATE", UUID.class, clientId);
                 Future<PreferenceResponse> future = executor.submit(() -> preferences.update(CLIENT,
                         new PreferenceRequest(Set.of(), Set.of(), Set.of(ingredientId), null, null)));
-                awaitBlockedTransaction();
+                await().atMost(Duration.ofSeconds(5)).until(future::isDone);
                 carts.add(CLIENT, new CartItemRequest(otherDishId, 1, false));
                 return future;
             });
             pending.get(20, TimeUnit.SECONDS);
-            assertThat(carts.get(CLIENT).items()).isEmpty();
+            assertThat(carts.get(CLIENT).items()).hasSize(2)
+                    .allSatisfy(item -> assertThat(item.excludedIngredients()).hasSize(1));
         }
     }
 
@@ -844,6 +853,83 @@ class BackendApplicationTests {
                 .andExpect(status().isUnauthorized()).andExpect(jsonPath("code").value("AUTHENTICATION_REQUIRED"))
                 .andExpect(jsonPath("message").isString())
                 .andExpect(content().string(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("wrong-password"))));
+    }
+
+    @Test
+    void onlyOwnerCanReadHiddenReviewsOfTheirOrder() throws Exception {
+        var order = checkout(CLIENT, "own-hidden-review");
+        complete(order);
+        var review = reviews.create(CLIENT, order.id(), new OrderReviewRequest(List.of(
+                new ReviewItemRequest(order.items().getFirst().id(), 5, true, "Текст автора")))).getFirst();
+        reviews.hide(ADMIN, review.id(), "Причина модерации");
+        String path = "/api/orders/" + order.id() + "/reviews";
+        mvc.perform(get(path).with(user(CLIENT).roles("CLIENT")))
+                .andExpect(status().isOk()).andExpect(jsonPath("$[0].id").value(review.id().toString()))
+                .andExpect(jsonPath("$[0].status").value("HIDDEN"))
+                .andExpect(jsonPath("$[0].moderationReason").value("Причина модерации"));
+        mvc.perform(get(path).with(user(OTHER).roles("CLIENT"))).andExpect(status().isNotFound());
+        mvc.perform(get(path).with(user(OWNER).roles("KITCHEN"))).andExpect(status().isForbidden());
+        mvc.perform(get(path)).andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/dishes/" + dishId + "/reviews"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(0));
+        assertThat(reviewQueries.summary(dishId).reviewCount()).isZero();
+    }
+
+    @Test
+    void visiblePageCanRequestScoresOutsideFirstHundredRecommendations() throws Exception {
+        preferences.update(CLIENT, new PreferenceRequest(Set.of(categoryId), Set.of(), Set.of(), null, null));
+        for (int i = 0; i < 100; i++) dish(1);
+        var last = recommendations.recommend(CLIENT, 1, 100).content().getLast().dish().id();
+        mvc.perform(get("/api/recommendations").param("dishIds", last.toString())
+                        .with(user(CLIENT).roles("CLIENT")))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content[0].dish.id").value(last.toString()))
+                .andExpect(jsonPath("$.content[0].score").value(100));
+        preferences.update(CLIENT, new PreferenceRequest(Set.of(categoryId), Set.of(), Set.of(ingredientId), null, null));
+        mvc.perform(get("/api/recommendations").param("dishIds", last.toString())
+                        .with(user(CLIENT).roles("CLIENT")))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.content.length()").value(0));
+        String tooMany = java.util.stream.IntStream.range(0, 101).mapToObj(i -> UUID.randomUUID().toString())
+                .collect(java.util.stream.Collectors.joining(","));
+        mvc.perform(get("/api/recommendations").param("dishIds", tooMany)
+                        .with(user(CLIENT).roles("CLIENT"))).andExpect(status().isBadRequest());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"0000000000", "+7 (777) 777-77-77"})
+    void repeatedDigitPhoneIsRejectedWithoutCreatingOrder(String phone) throws Exception {
+        carts.add(CLIENT, new CartItemRequest(dishId, 1, false));
+        mvc.perform(post("/api/orders").with(user(CLIENT).roles("CLIENT")).with(csrf())
+                        .header("Idempotency-Key", "invalid-phone-key").contentType("application/json")
+                        .content("""
+                                {"deliveryAddress":"Учебная улица, дом 10", "phone":"%s",
+                                 "items":[{"dishId":"%s","quantity":1}]}
+                                """.formatted(phone, dishId)))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("INVALID_PHONE"));
+        assertThat(count("orders")).isZero();
+        assertThat(count("reservations")).isZero();
+        assertThat(carts.get(CLIENT).items()).hasSize(1);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"0окшк", "0000000000", "wrong@", "a@b.test; 0000000000"})
+    void kitchenRejectsInvalidContacts(String contacts) throws Exception {
+        mvc.perform(post("/api/kitchens").with(user(CLIENT).roles("CLIENT")).with(csrf())
+                        .contentType("application/json").content("""
+                                {"name":"Кухня","description":"Домашние блюда","contacts":"%s","deliveryArea":"Центр"}
+                                """.formatted(contacts)))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("INVALID_CONTACTS"))
+                .andExpect(jsonPath("$.fields.contacts").isNotEmpty());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"+7 (999) 123-45-67", "kitchen@example.test", "79991234567; kitchen@example.test"})
+    void kitchenAcceptsPhoneOrEmail(String contacts) throws Exception {
+        mvc.perform(post("/api/kitchens").with(user(CLIENT).roles("CLIENT")).with(csrf())
+                        .contentType("application/json").content("""
+                                {"name":"Кухня","description":"Домашние блюда","contacts":"%s","deliveryArea":"Центр"}
+                                """.formatted(contacts)))
+                .andExpect(status().isCreated());
     }
 
 }

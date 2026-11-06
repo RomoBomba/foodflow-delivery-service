@@ -67,6 +67,14 @@ public class ReviewService {
     }
 
     @Transactional(readOnly = true)
+    public List<ReviewResponse> findForOwnOrder(String email, UUID orderId) {
+        UUID userId = identityQueryService.getUserId(email);
+        orders.requireOwnedOrder(orderId, userId);
+        return reviewRepository.findAllByOrderIdAndUserIdOrderByCreatedAtDesc(orderId, userId)
+                .stream().map(ReviewResponse::from).toList();
+    }
+
+    @Transactional(readOnly = true)
     public List<ReviewResponse> findVisibleByDish(UUID dishId) {
         if (!catalog.dishExists(dishId)) {
             throw new ApiException(HttpStatus.NOT_FOUND, "DISH_NOT_FOUND", "Блюдо не найдено");
