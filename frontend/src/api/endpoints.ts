@@ -70,7 +70,9 @@ export const ordersApi = {
     api<Order>('/api/orders', { method: 'POST', json: request, headers: { 'Idempotency-Key': idempotencyKey } }),
   list: () => api<Order[]>('/api/orders'),
   get: (orderId: UUID) => api<Order>(`/api/orders/${id(orderId)}`),
-  cancel: (orderId: UUID) => api<Order>(`/api/orders/${id(orderId)}/cancel`, { method: 'POST' }),
+  cancel: (orderId: UUID, expectedVersion: number) =>
+    api<Order>(`/api/orders/${id(orderId)}/cancel`, { method: 'POST', json: { expectedVersion } }),
+  reviews: (orderId: UUID) => api<Review[]>(`/api/orders/${id(orderId)}/reviews`),
   review: (orderId: UUID, items: ReviewItemRequest[]) =>
     api<Review[]>(`/api/orders/${id(orderId)}/reviews`, { method: 'POST', json: { items } }),
 };
@@ -86,8 +88,8 @@ export const kitchenApi = {
     api<KitchenDish>(`/api/kitchens/me/dishes/${id(dishId)}`, { method: 'PUT', json: request }),
   archiveDish: (dishId: UUID) => api<void>(`/api/kitchens/me/dishes/${id(dishId)}`, { method: 'DELETE' }),
   orders: () => api<Order[]>('/api/kitchens/me/orders'),
-  changeStatus: (orderId: UUID, status: OrderStatus, reason: string | null) =>
-    api<Order>(`/api/kitchens/me/orders/${id(orderId)}/status`, { method: 'PATCH', json: { status, reason } }),
+  changeStatus: (orderId: UUID, status: OrderStatus, expectedVersion: number, reason: string | null) =>
+    api<Order>(`/api/kitchens/me/orders/${id(orderId)}/status`, { method: 'PATCH', json: { status, expectedVersion, reason } }),
   reviews: () => api<Review[]>('/api/kitchens/me/reviews'),
 };
 

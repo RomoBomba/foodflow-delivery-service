@@ -15,6 +15,7 @@ public record OrderResponse(
         String paymentMethod,
         String comment,
         OrderStatus status,
+        long version,
         BigDecimal totalPrice,
         String cancellationReason,
         Instant createdAt,

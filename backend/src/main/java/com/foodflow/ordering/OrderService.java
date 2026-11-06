@@ -1,15 +1,13 @@
 package com.foodflow.ordering;
 
 import com.foodflow.catalog.dish.Dish;
-import com.foodflow.catalog.dish.DishRepository;
-import com.foodflow.catalog.ingredient.Ingredient;
+import com.foodflow.catalog.CatalogQueryService;
+import com.foodflow.catalog.CatalogStockService;
 import com.foodflow.catalog.kitchen.Kitchen;
-import com.foodflow.catalog.kitchen.KitchenRepository;
 import com.foodflow.catalog.kitchen.KitchenStatus;
 import com.foodflow.common.ApiException;
 import com.foodflow.identity.IdentityQueryService;
-import com.foodflow.preferences.Preference;
-import com.foodflow.preferences.PreferenceRepository;
+import com.foodflow.recommendation.PreferenceQueryService;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -29,56 +27,54 @@ import java.util.stream.Collectors;
 
 @Service
 public class OrderService {
+    private final ReservationService reservations;
     private final OrderRepository orderRepository;
     private final OrderItemRepository orderItemRepository;
     private final OrderStatusHistoryRepository historyRepository;
     private final CartRepository cartRepository;
     private final CartItemRepository cartItemRepository;
-    private final DishRepository dishRepository;
-    private final KitchenRepository kitchenRepository;
-    private final PreferenceRepository preferenceRepository;
+    private final CatalogQueryService catalog;
+    private final CatalogStockService stock;
+    private final PreferenceQueryService preferenceQuery;
     private final IdentityQueryService identityQueryService;
 
     public OrderService(
+            ReservationService reservations,
             OrderRepository orderRepository,
             OrderItemRepository orderItemRepository,
             OrderStatusHistoryRepository historyRepository,
             CartRepository cartRepository,
             CartItemRepository cartItemRepository,
-            DishRepository dishRepository,
-            KitchenRepository kitchenRepository,
-            PreferenceRepository preferenceRepository,
+            CatalogQueryService catalog,
+            CatalogStockService stock,
+            PreferenceQueryService preferenceQuery,
             IdentityQueryService identityQueryService
     ) {
+        this.reservations = reservations;
         this.orderRepository = orderRepository;
         this.orderItemRepository = orderItemRepository;
         this.historyRepository = historyRepository;
         this.cartRepository = cartRepository;
         this.cartItemRepository = cartItemRepository;
-        this.dishRepository = dishRepository;
-        this.kitchenRepository = kitchenRepository;
-        this.preferenceRepository = preferenceRepository;
+        this.catalog = catalog;
+        this.stock = stock;
+        this.preferenceQuery = preferenceQuery;
         this.identityQueryService = identityQueryService;
     }
 
     @Transactional
-    public OrderResponse create(String email, String idempotencyKey, OrderCreateRequest request) {
+    public OrderCreationResult create(String email, String idempotencyKey, OrderCreateRequest request) {
         UUID customerId = identityQueryService.getUserId(email);
         validateIdempotencyKey(idempotencyKey);
         validatePhone(request.phone());
         validateAddress(request.deliveryAddress());
         String fingerprint = fingerprint(request);
 
-        CustomerOrder existing = orderRepository
-                .findByCustomerIdAndIdempotencyKey(customerId, idempotencyKey)
-                .orElse(null);
-        if (existing != null) return idempotentResult(existing, fingerprint, request);
-
-        Cart cart = cartRepository.findByUserIdForUpdate(customerId)
-                .orElseThrow(() -> new ApiException(HttpStatus.CONFLICT, "CART_EMPTY", "Корзина пуста"));
-        // The first lookup may predate a concurrent checkout, even if the cart was refilled.
-        existing = orderRepository.findByCustomerIdAndIdempotencyKey(customerId, idempotencyKey).orElse(null);
-        if (existing != null) return idempotentResult(existing, fingerprint, request);
+        // Serialize this customer's checkout before checking the key, including a refilled cart.
+        Cart cart = cartRepository.findByUserIdForUpdate(customerId).orElse(null);
+        CustomerOrder existing = orderRepository.findByCustomerIdAndIdempotencyKey(customerId, idempotencyKey).orElse(null);
+        if (existing != null) return new OrderCreationResult(idempotentResult(existing, fingerprint, request), true);
+        if (cart == null) throw new ApiException(HttpStatus.CONFLICT, "CART_EMPTY", "Корзина пуста");
         List<CartItem> cartItems = cartItemRepository.findAllByCartIdOrderByDishIdAsc(cart.getId());
         if (cartItems.isEmpty()) {
             throw new ApiException(HttpStatus.CONFLICT, "CART_EMPTY", "Корзина пуста");
@@ -89,33 +85,20 @@ public class OrderService {
         ensureRequestMatchesCart(request.items(), cartItems);
 
         // Serialize checkouts for the same kitchen. Dish locks below are always acquired by UUID order.
-        Kitchen kitchen = kitchenRepository.findByIdForUpdate(cart.getKitchenId())
+        Kitchen kitchen = stock.lockKitchen(cart.getKitchenId())
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "KITCHEN_NOT_FOUND", "Кухня не найдена"));
         if (kitchen.getStatus() != KitchenStatus.APPROVED || !kitchen.isAcceptingOrders()) {
             throw new ApiException(HttpStatus.CONFLICT, "KITCHEN_CLOSED", "Кухня не принимает новые заказы");
         }
 
-        Preference preference = preferenceRepository.findById(customerId).orElse(null);
-        var excluded = preference == null ? java.util.Set.<UUID>of() : preference.getExcludedIngredientIds();
+        var excluded = preferenceQuery.excludedIngredients(customerId);
         List<Dish> lockedDishes = new ArrayList<>();
         Map<UUID, CartItem> cartItemByDish = cartItems.stream()
                 .collect(Collectors.toMap(CartItem::getDishId, item -> item));
         for (CartItem cartItem : cartItems) {
-            Dish dish = dishRepository.findByIdForUpdate(cartItem.getDishId())
+            Dish dish = stock.lockDish(cartItem.getDishId())
                     .orElseThrow(() -> new ApiException(HttpStatus.CONFLICT, "DISH_UNAVAILABLE", "Одно из блюд больше недоступно"));
-            if (!dish.getKitchenId().equals(kitchen.getId()) || dish.isArchived()) {
-                throw new ApiException(HttpStatus.CONFLICT, "DISH_UNAVAILABLE", "Одно из блюд больше недоступно");
-            }
-            if (dish.getAvailablePortions() < cartItem.getQuantity()) {
-                throw new ApiException(HttpStatus.CONFLICT, "INSUFFICIENT_STOCK", "Недостаточно свободных порций",
-                        Map.of("dishId", dish.getId(), "availablePortions", dish.getAvailablePortions()));
-            }
-            var excludedIngredient = dish.getIngredients().stream()
-                    .map(Ingredient::getId).filter(excluded::contains).findFirst();
-            if (excludedIngredient.isPresent()) {
-                throw new ApiException(HttpStatus.CONFLICT, "EXCLUDED_INGREDIENT", "Блюдо содержит исключённый ингредиент",
-                        Map.of("dishId", dish.getId(), "ingredientId", excludedIngredient.get()));
-            }
+            stock.ensurePurchasable(dish, kitchen, cartItem.getQuantity(), excluded);
             lockedDishes.add(dish);
         }
 
@@ -152,17 +135,18 @@ public class OrderService {
         ));
         for (Dish dish : lockedDishes) {
             CartItem item = cartItemByDish.get(dish.getId());
-            dish.reservePortions(item.getQuantity());
-            orderItemRepository.save(new OrderItem(
+            stock.reserve(dish.getId(), item.getQuantity());
+            OrderItem savedItem = orderItemRepository.save(new OrderItem(
                     order.getId(), dish.getId(), dish.getName(), dish.getPrice(), item.getQuantity(),
                     dish.getWeightGrams(), dish.getKcalPerPortion()
             ));
+            reservations.create(savedItem);
         }
         historyRepository.save(new OrderStatusHistory(order.getId(), null, OrderStatus.CREATED, customerId, null));
         cartItemRepository.deleteByCartId(cart.getId());
         cart.setKitchenId(null);
         cart.touch();
-        return toResponse(order);
+        return new OrderCreationResult(toResponse(order), false);
     }
 
     @Transactional(readOnly = true)
@@ -183,23 +167,25 @@ public class OrderService {
     @Transactional(readOnly = true)
     public List<OrderResponse> getKitchenOrders(String email) {
         UUID ownerId = identityQueryService.getUserId(email);
-        Kitchen kitchen = kitchenRepository.findByOwnerId(ownerId)
+        Kitchen kitchen = catalog.findOwnedKitchen(ownerId)
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "KITCHEN_NOT_FOUND", "Кухня не найдена"));
         return orderRepository.findAllByKitchenIdOrderByCreatedAtDesc(kitchen.getId())
                 .stream().map(this::toResponse).toList();
     }
 
     @Transactional
-    public OrderResponse cancelByCustomer(String email, UUID orderId) {
+    public OrderResponse cancelByCustomer(String email, UUID orderId, long expectedVersion) {
         UUID customerId = identityQueryService.getUserId(email);
         CustomerOrder order = orderRepository.findByIdAndCustomerForUpdate(orderId, customerId)
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "ORDER_NOT_FOUND", "Заказ не найден"));
+        ensureVersion(order, expectedVersion);
         if (order.getStatus() != OrderStatus.CREATED) {
             throw new ApiException(HttpStatus.CONFLICT, "ORDER_NOT_CANCELLABLE", "Отменить можно только заказ в статусе CREATED");
         }
-        releaseReservation(order);
         OrderStatus oldStatus = order.getStatus();
         order.changeStatus(OrderStatus.CANCELLED, "Отменено клиентом");
+        orderRepository.flush(); // @Version guards the update before releasing the reservation.
+        reservations.release(order.getId());
         historyRepository.save(new OrderStatusHistory(order.getId(), oldStatus, OrderStatus.CANCELLED, customerId, "Отменено клиентом"));
         return toResponse(order);
     }
@@ -207,11 +193,12 @@ public class OrderService {
     @Transactional
     public OrderResponse changeStatusByKitchen(String email, UUID orderId, OrderStatusRequest request) {
         UUID ownerId = identityQueryService.getUserId(email);
-        Kitchen kitchen = kitchenRepository.findByOwnerId(ownerId)
+        Kitchen kitchen = catalog.findOwnedKitchen(ownerId)
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "KITCHEN_NOT_FOUND", "Кухня не найдена"));
         CustomerOrder order = orderRepository.findByIdAndKitchenForUpdate(orderId, kitchen.getId())
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "ORDER_NOT_FOUND", "Заказ не найден"));
 
+        ensureVersion(order, request.expectedVersion());
         OrderStatus from = order.getStatus();
         OrderStatus to = request.status();
         String reason = to == OrderStatus.CANCELLED && request.reason() != null
@@ -223,24 +210,20 @@ public class OrderService {
             if (reason == null || reason.isBlank()) {
                 throw new ApiException(HttpStatus.BAD_REQUEST, "CANCELLATION_REASON_REQUIRED", "Укажите причину отклонения заказа");
             }
-            releaseReservation(order);
         }
         order.changeStatus(to, reason);
+        orderRepository.flush();
+        if (to == OrderStatus.CANCELLED) reservations.release(order.getId());
+        if (to == OrderStatus.COMPLETED) reservations.consume(order.getId());
         historyRepository.save(new OrderStatusHistory(order.getId(), from, to, ownerId, reason));
         return toResponse(order);
     }
 
-    private void releaseReservation(CustomerOrder order) {
-        if (order.isReservationReleased()) {
-            throw new ApiException(HttpStatus.CONFLICT, "RESERVATION_ALREADY_RELEASED", "Резерв уже освобождён");
+    private void ensureVersion(CustomerOrder order, long expectedVersion) {
+        if (order.getVersion() != expectedVersion) {
+            throw new ApiException(HttpStatus.CONFLICT, "ORDER_VERSION_CONFLICT",
+                    "Заказ изменился. Обновите карточку заказа.", Map.of("currentVersion", order.getVersion()));
         }
-        List<OrderItem> items = orderItemRepository.findAllByOrderIdOrderByDishIdAsc(order.getId());
-        for (OrderItem item : items) {
-            Dish dish = dishRepository.findByIdForUpdate(item.getDishId())
-                    .orElseThrow(() -> new ApiException(HttpStatus.CONFLICT, "DISH_MISSING", "Не удалось восстановить остаток блюда"));
-            dish.releasePortions(item.getQuantity());
-        }
-        order.markReservationReleased();
     }
 
     private void ensureRequestMatchesCart(List<OrderLineRequest> requested, List<CartItem> cartItems) {
@@ -359,7 +342,7 @@ public class OrderService {
                 .stream().map(OrderHistoryResponse::from).toList();
         return new OrderResponse(
                 order.getId(), order.getId().toString(), order.getCustomerId(), order.getKitchenId(),
-                order.getDeliveryAddress(), order.getPhone(), order.getPaymentMethod(), order.getComment(), order.getStatus(),
+                order.getDeliveryAddress(), order.getPhone(), order.getPaymentMethod(), order.getComment(), order.getStatus(), order.getVersion(),
                 order.getTotalPrice(), order.getCancellationReason(), order.getCreatedAt(), order.getUpdatedAt(),
                 items, history
         );

@@ -9,6 +9,7 @@ import { countLabel, formatMoney } from '../lib/format';
 import { useDocumentTitle, useSessionDraft } from '../lib/hooks';
 import { hasErrors, newIdempotencyKey, validateAddress, validateOptional, validatePhone, type FieldErrors } from '../lib/validation';
 import { useCart } from '../state/cart';
+import { useAuth } from '../state/auth';
 import { useDictionaries } from '../state/dictionaries';
 
 interface Draft {
@@ -37,11 +38,12 @@ function isBlocked(item: CartItem): boolean {
 export function CartPage() {
   useDocumentTitle('Корзина');
   const cart = useCart();
+  const { user } = useAuth();
   const toast = useToast();
   const navigate = useNavigate();
   const { kitchenName } = useDictionaries();
-  const [draft, setDraft, clearDraft] = useSessionDraft<Draft>('ff.checkout.draft', EMPTY_DRAFT);
-  const [attempt, setAttempt, clearAttempt] = useSessionDraft<Attempt>('ff.checkout.attempt', { key: '', unknownBody: null });
+  const [draft, setDraft, clearDraft] = useSessionDraft<Draft>(`ff.checkout.draft.${user!.id}`, EMPTY_DRAFT);
+  const [attempt, setAttempt, clearAttempt] = useSessionDraft<Attempt>(`ff.checkout.attempt.${user!.id}`, { key: '', unknownBody: null });
   const [errors, setErrors] = useState<FieldErrors>({});
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<unknown>(null);
@@ -96,6 +98,8 @@ export function CartPage() {
     setSubmitting(true);
     setSubmitError(null);
     setReusedKey(false);
+    // Persist before sending: a reload or lost response must retry the same request.
+    setAttempt({ key, unknownBody: body });
     try {
       const order = await ordersApi.create(key, body);
       setAttempt({ key: '', unknownBody: null });
@@ -105,7 +109,7 @@ export function CartPage() {
       await cart.refresh().catch(() => undefined);
       navigate(`/orders/${order.id}`, { state: { created: true } });
     } catch (error) {
-      if (error instanceof NetworkError) {
+      if (error instanceof NetworkError || (error instanceof ApiError && error.status >= 500)) {
         // Исход неизвестен: сохраняем ключ и тело, повтор будет с ними же.
         setAttempt({ key, unknownBody: body });
         setNetworkFailed(true);
@@ -210,10 +214,19 @@ export function CartPage() {
 
   const kitchen = cart.cart.kitchenId ? kitchenName(cart.cart.kitchenId) : undefined;
 
+  const recovery = attempt.unknownBody && !submitting ? (
+    <Alert tone="warn" title="Результат оформления неизвестен.">
+      <p>Заказ мог сохраниться, даже если ответ не пришёл. Проверьте результат перед новым оформлением.</p>
+      <button type="button" className="btn primary mt-12" onClick={retryUnknown}>Проверить результат оформления</button>
+      <Link className="btn mt-12" to="/orders">Мои заказы</Link>
+    </Alert>
+  ) : null;
+
   if (items.length === 0) {
     return (
       <>
         <ErrorAlert error={loadError} />
+        {recovery}
         {reusedKey && <ReusedKeyAlert />}
         <Empty title="Корзина пуста">
           <p>Выберите блюда в каталоге — в одном заказе блюда одной кухни.</p>
@@ -233,6 +246,7 @@ export function CartPage() {
         <button type="button" className="btn ghost" onClick={() => setConfirmClear(true)}>Очистить корзину</button>
       </div>
 
+      {recovery}
       <div className="with-aside">
         <div className="stack">
           {reusedKey && <ReusedKeyAlert />}
@@ -345,7 +359,7 @@ export function CartPage() {
           <div className="total-row big"><span>Итого</span><span className="num">{formatMoney(cart.cart.totalPrice)}</span></div>
           <p className="tiny muted" style={{ margin: '4px 0 14px' }}>Итоговую сумму рассчитывает и фиксирует сервер.</p>
           <ErrorAlert error={submitError} />
-          <button type="submit" className="btn primary lg block mt-12" disabled={submitting || blocked.length > 0}>
+          <button type="submit" className="btn primary lg block mt-12" disabled={submitting || blocked.length > 0 || attempt.unknownBody !== null}>
             {submitting ? 'Оформляем…' : 'Оформить заказ'}
           </button>
           {blocked.length > 0 && <p className="tiny mt-8" style={{ color: 'var(--danger)' }}>Уберите недоступные позиции</p>}
@@ -391,7 +405,7 @@ export function CartPage() {
 
       {networkFailed && (
         <Modal
-          title="Не удалось отправить заказ"
+          title="Результат оформления неизвестен"
           onClose={() => setNetworkFailed(false)}
           actions={
             <>
@@ -403,7 +417,7 @@ export function CartPage() {
           }
         >
           <p className="small">
-            Нет связи с сервером, и мы не знаем, успел ли он принять заказ. Повтор безопасен: второй заказ не создастся.
+            Ответ сервера не получен или содержит ошибку, и мы не знаем, успел ли он принять заказ. Повтор безопасен: второй заказ не создастся.
           </p>
           <Alert tone="warn">Введённые данные сохранены.</Alert>
         </Modal>

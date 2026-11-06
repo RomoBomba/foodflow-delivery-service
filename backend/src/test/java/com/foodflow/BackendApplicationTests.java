@@ -5,7 +5,7 @@ import com.foodflow.catalog.kitchen.*;
 import com.foodflow.common.ApiException;
 import com.foodflow.feedback.*;
 import com.foodflow.ordering.*;
-import com.foodflow.preferences.*;
+import com.foodflow.recommendation.*;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -127,7 +127,16 @@ class BackendApplicationTests {
 
     private OrderResponse checkout(String email, String key) {
         carts.add(email, new CartItemRequest(dishId, 1, false));
-        return orders.create(email, key, request(dishId));
+        return create(email, key, request(dishId));
+    }
+
+    private OrderResponse create(String email, String key, OrderCreateRequest request) {
+        return orders.create(email, key, request).order();
+    }
+
+    private String reservationStatus(OrderResponse order) {
+        return jdbc.queryForObject("SELECT status FROM reservations WHERE order_item_id = ?",
+                String.class, order.items().getFirst().id());
     }
 
     private int stock() {
@@ -174,7 +183,7 @@ class BackendApplicationTests {
     @Test
     void cleanDatabaseMigratesAndValidatesSchema() {
         assertThat(jdbc.queryForObject("SELECT count(*) FROM flyway_schema_history WHERE success", Integer.class))
-                .isEqualTo(11);
+                .isEqualTo(12);
         assertThat(count("categories")).isPositive();
         assertThat(count("ingredients")).isPositive();
     }
@@ -218,8 +227,8 @@ class BackendApplicationTests {
                 request(dishId).items(), false, null);
         var collision = new OrderCreateRequest("Адрес доставки", "79991111111", "79992222222\nКомментарий",
                 request(dishId).items(), false, null);
-        orders.create(CLIENT, "multiline-key", first);
-        conflict("IDEMPOTENCY_KEY_REUSED", () -> orders.create(CLIENT, "multiline-key", collision));
+        create(CLIENT, "multiline-key", first);
+        conflict("IDEMPOTENCY_KEY_REUSED", () -> create(CLIENT, "multiline-key", collision));
         assertThat(count("orders")).isEqualTo(1);
         assertThat(stock()).isEqualTo(9);
     }
@@ -230,9 +239,9 @@ class BackendApplicationTests {
         try (var executor = Executors.newSingleThreadExecutor()) {
             Future<OrderResponse> pending = transaction(() -> {
                 jdbc.queryForObject("SELECT id FROM carts WHERE user_id = ? FOR UPDATE", UUID.class, clientId);
-                Future<OrderResponse> future = executor.submit(() -> orders.create(CLIENT, "refilled-key", request(dishId)));
+                Future<OrderResponse> future = executor.submit(() -> create(CLIENT, "refilled-key", request(dishId)));
                 awaitBlockedTransaction();
-                orders.create(CLIENT, "refilled-key", request(dishId));
+                create(CLIENT, "refilled-key", request(dishId));
                 carts.add(CLIENT, new CartItemRequest(otherDishId, 1, false));
                 return future;
             });
@@ -248,8 +257,8 @@ class BackendApplicationTests {
         jdbc.update("UPDATE dishes SET available_portions = 1 WHERE id = ?", dishId);
         carts.add(CLIENT, new CartItemRequest(dishId, 1, false));
         carts.add(OTHER, new CartItemRequest(dishId, 1, false));
-        var results = race(() -> orders.create(CLIENT, "last-first", request(dishId)),
-                () -> orders.create(OTHER, "last-second", request(dishId)));
+        var results = race(() -> create(CLIENT, "last-first", request(dishId)),
+                () -> create(OTHER, "last-second", request(dishId)));
         assertThat(results.stream().filter(OrderResponse.class::isInstance)).hasSize(1);
         assertThat(results).contains("INSUFFICIENT_STOCK");
         assertThat(stock()).isZero();
@@ -260,8 +269,8 @@ class BackendApplicationTests {
     @Test
     void parallelIdenticalRequestsReserveOnce() throws Exception {
         carts.add(CLIENT, new CartItemRequest(dishId, 1, false));
-        var results = race(() -> orders.create(CLIENT, "parallel-key", request(dishId)),
-                () -> orders.create(CLIENT, "parallel-key", request(dishId)));
+        var results = race(() -> create(CLIENT, "parallel-key", request(dishId)),
+                () -> create(CLIENT, "parallel-key", request(dishId)));
         assertThat(results).allMatch(OrderResponse.class::isInstance);
         assertThat(((OrderResponse) results.get(0)).id()).isEqualTo(((OrderResponse) results.get(1)).id());
         assertThat(stock()).isEqualTo(9);
@@ -273,8 +282,8 @@ class BackendApplicationTests {
     @Test
     void keyCannotBeReusedWithChangedPayloadAndIsScopedToCustomer() {
         var original = checkout(CLIENT, "shared-key");
-        conflict("IDEMPOTENCY_KEY_REUSED", () -> orders.create(CLIENT, "shared-key", request(otherDishId)));
-        assertThat(orders.create(CLIENT, "shared-key", request(dishId)).id()).isEqualTo(original.id());
+        conflict("IDEMPOTENCY_KEY_REUSED", () -> create(CLIENT, "shared-key", request(otherDishId)));
+        assertThat(create(CLIENT, "shared-key", request(dishId)).id()).isEqualTo(original.id());
         assertThat(checkout(OTHER, "shared-key").id()).isNotEqualTo(original.id());
     }
 
@@ -287,22 +296,23 @@ class BackendApplicationTests {
                 """);
         jdbc.execute("CREATE TRIGGER fail_history BEFORE INSERT ON order_status_history FOR EACH ROW EXECUTE FUNCTION fail_history()");
         try {
-            assertThatThrownBy(() -> orders.create(CLIENT, "rollback-key", request(dishId)))
+            assertThatThrownBy(() -> create(CLIENT, "rollback-key", request(dishId)))
                     .isInstanceOf(RuntimeException.class).hasStackTraceContaining("injected test failure");
             assertThat(stock()).isEqualTo(10);
             assertThat(count("orders")).isZero();
             assertThat(count("order_items")).isZero();
+            assertThat(count("reservations")).isZero();
             assertThat(count("order_status_history")).isZero();
             assertThat(carts.get(CLIENT).items()).hasSize(1);
         } finally {
             jdbc.execute("DROP TRIGGER fail_history ON order_status_history");
             jdbc.execute("DROP FUNCTION fail_history()");
         }
-        assertThat(orders.create(CLIENT, "rollback-key", request(dishId)).status()).isEqualTo(OrderStatus.CREATED);
+        assertThat(create(CLIENT, "rollback-key", request(dishId)).status()).isEqualTo(OrderStatus.CREATED);
     }
 
     private String priceQuote(OrderCreateRequest request) {
-        ApiException error = catchThrowableOfType(() -> orders.create(CLIENT, "price-key", request), ApiException.class);
+        ApiException error = catchThrowableOfType(() -> create(CLIENT, "price-key", request), ApiException.class);
         assertThat(error.getCode()).isEqualTo("PRICE_CHANGED");
         return (String) error.getDetails().get("updatedPriceFingerprint");
     }
@@ -318,7 +328,7 @@ class BackendApplicationTests {
         String newQuote = priceQuote(confirmed);
         assertThat(newQuote).isNotEqualTo(oldQuote);
         assertThat(count("orders")).isZero();
-        var order = orders.create(CLIENT, "price-key", new OrderCreateRequest(confirmed.deliveryAddress(), confirmed.phone(),
+        var order = create(CLIENT, "price-key", new OrderCreateRequest(confirmed.deliveryAddress(), confirmed.phone(),
                 null, confirmed.items(), true, newQuote));
         assertThat(order.totalPrice()).isEqualByComparingTo("140.00");
         jdbc.update("UPDATE dishes SET price = 999, name = 'Другое имя', archived = true WHERE id = ?", dishId);
@@ -330,8 +340,8 @@ class BackendApplicationTests {
     @Test
     void acceptingAndCancellingCannotBothSucceed() throws Exception {
         var order = checkout(CLIENT, "cancel-race");
-        var results = race(() -> orders.cancelByCustomer(CLIENT, order.id()),
-                () -> orders.changeStatusByKitchen(OWNER, order.id(), new OrderStatusRequest(OrderStatus.PREPARING, null)));
+        var results = race(() -> orders.cancelByCustomer(CLIENT, order.id(), order.version()),
+                () -> orders.changeStatusByKitchen(OWNER, order.id(), new OrderStatusRequest(OrderStatus.PREPARING, order.version(), null)));
         assertThat(results.stream().filter(OrderResponse.class::isInstance)).hasSize(1);
         OrderStatus status = orders.getMine(CLIENT, order.id()).status();
         assertThat(status).isIn(OrderStatus.CANCELLED, OrderStatus.PREPARING);
@@ -342,21 +352,21 @@ class BackendApplicationTests {
     @Test
     void concurrentCancellationsReturnPortionsExactlyOnce() throws Exception {
         var order = checkout(CLIENT, "cancel-twice");
-        var results = race(() -> orders.cancelByCustomer(CLIENT, order.id()),
-                () -> orders.cancelByCustomer(CLIENT, order.id()));
+        var results = race(() -> orders.cancelByCustomer(CLIENT, order.id(), order.version()),
+                () -> orders.cancelByCustomer(CLIENT, order.id(), order.version()));
         assertThat(results.stream().filter(OrderResponse.class::isInstance)).hasSize(1);
-        assertThat(results).contains("ORDER_NOT_CANCELLABLE");
+        assertThat(results).contains("ORDER_VERSION_CONFLICT");
         assertThat(stock()).isEqualTo(10);
-        assertThat(jdbc.queryForObject("SELECT reservation_released FROM orders WHERE id = ?", Boolean.class, order.id())).isTrue();
+        assertThat(reservationStatus(order)).isEqualTo("RELEASED");
         assertThat(count("order_status_history")).isEqualTo(2);
     }
 
     @Test
     void kitchenMustGiveReasonAndCannotSkipStages() {
         var order = checkout(CLIENT, "stages-key");
-        conflict("CANCELLATION_REASON_REQUIRED", () -> orders.changeStatusByKitchen(OWNER, order.id(), new OrderStatusRequest(OrderStatus.CANCELLED, " ")));
-        conflict("INVALID_ORDER_TRANSITION", () -> orders.changeStatusByKitchen(OWNER, order.id(), new OrderStatusRequest(OrderStatus.COMPLETED, null)));
-        orders.changeStatusByKitchen(OWNER, order.id(), new OrderStatusRequest(OrderStatus.CANCELLED, "Нет возможности приготовить"));
+        conflict("CANCELLATION_REASON_REQUIRED", () -> orders.changeStatusByKitchen(OWNER, order.id(), new OrderStatusRequest(OrderStatus.CANCELLED, order.version(), " ")));
+        conflict("INVALID_ORDER_TRANSITION", () -> orders.changeStatusByKitchen(OWNER, order.id(), new OrderStatusRequest(OrderStatus.COMPLETED, order.version(), null)));
+        orders.changeStatusByKitchen(OWNER, order.id(), new OrderStatusRequest(OrderStatus.CANCELLED, order.version(), "Нет возможности приготовить"));
         assertThat(stock()).isEqualTo(10);
         assertThat(orders.getMine(CLIENT, order.id()).history().getLast().reason()).isEqualTo("Нет возможности приготовить");
     }
@@ -366,7 +376,7 @@ class BackendApplicationTests {
         var order = checkout(CLIENT, "blocked-key");
         carts.add(OTHER, new CartItemRequest(dishId, 1, false));
         moderation.block(kitchenId, ADMIN, "Проверка кухни");
-        conflict("KITCHEN_CLOSED", () -> orders.create(OTHER, "blocked-new", request(dishId)));
+        conflict("KITCHEN_CLOSED", () -> create(OTHER, "blocked-new", request(dishId)));
         conflict("KITCHEN_CLOSED", () -> carts.add(CLIENT, new CartItemRequest(dishId, 1, false)));
         assertThat(kitchens.getMine(OWNER).acceptingOrders()).isFalse();
         complete(order);
@@ -375,8 +385,8 @@ class BackendApplicationTests {
     }
 
     private void complete(OrderResponse order) {
-        for (OrderStatus status : List.of(OrderStatus.PREPARING, OrderStatus.IN_DELIVERY, OrderStatus.COMPLETED)) {
-            orders.changeStatusByKitchen(OWNER, order.id(), new OrderStatusRequest(status, null));
+        for (OrderStatus status : List.of(OrderStatus.PREPARING, OrderStatus.DELIVERING, OrderStatus.COMPLETED)) {
+            order = orders.changeStatusByKitchen(OWNER, order.id(), new OrderStatusRequest(status, order.version(), null));
         }
     }
 
@@ -392,7 +402,7 @@ class BackendApplicationTests {
         UUID cartId = carts.get(CLIENT).id();
         jdbc.update("UPDATE carts SET kitchen_id = ? WHERE id = ?", kitchenId, cartId);
         jdbc.update("INSERT INTO cart_items VALUES (?, ?, ?, 1, 100)", UUID.randomUUID(), cartId, dishId);
-        conflict("EXCLUDED_INGREDIENT", () -> orders.create(CLIENT, "excluded-key", request(dishId)));
+        conflict("EXCLUDED_INGREDIENT", () -> create(CLIENT, "excluded-key", request(dishId)));
     }
 
     @Test
@@ -421,10 +431,11 @@ class BackendApplicationTests {
         conflict("ORDER_NOT_FOUND", () -> reviews.create(OTHER, order.id(), request));
         var review = reviews.create(CLIENT, order.id(), request).getFirst();
         conflict("REVIEW_ALREADY_EXISTS", () -> reviews.create(CLIENT, order.id(), request));
+        assertThat(review.status()).isEqualTo(ReviewStatus.VISIBLE);
         assertThat(reviewQueries.summary(dishId).averageRating()).isEqualTo(5.0);
         assertThat(reviewQueries.summary(dishId).repeatOrderPercent()).isEqualTo(100);
         conflict("MODERATION_REASON_REQUIRED", () -> reviews.hide(ADMIN, review.id(), " "));
-        reviews.hide(ADMIN, review.id(), "Нарушение правил");
+        assertThat(reviews.hide(ADMIN, review.id(), "Нарушение правил").status()).isEqualTo(ReviewStatus.HIDDEN);
         assertThat(reviewQueries.summary(dishId).reviewCount()).isZero();
         assertThat(reviewQueries.summary(dishId).averageRating()).isNull();
         assertThat(reviewQueries.summary(dishId).repeatOrderPercent()).isNull();
@@ -435,11 +446,14 @@ class BackendApplicationTests {
     @Test
     void protectedEndpointsRequireAuthenticationRolesAndOwnership() throws Exception {
         var order = checkout(CLIENT, "security-key");
-        mvc.perform(get("/api/orders")).andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/orders")).andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("code").value("AUTHENTICATION_REQUIRED")).andExpect(jsonPath("message").isString());
         mvc.perform(get("/api/orders/" + order.id()).with(user(OTHER).roles("CLIENT"))).andExpect(status().isNotFound());
-        mvc.perform(post("/api/orders/" + order.id() + "/cancel").with(user(OTHER).roles("CLIENT")).with(csrf()))
+        mvc.perform(post("/api/orders/" + order.id() + "/cancel").with(user(OTHER).roles("CLIENT")).with(csrf())
+                        .contentType("application/json").content("{\"expectedVersion\":0}"))
                 .andExpect(status().isNotFound());
-        mvc.perform(get("/api/admin/reviews").with(user(CLIENT).roles("CLIENT"))).andExpect(status().isForbidden());
+        mvc.perform(get("/api/admin/reviews").with(user(CLIENT).roles("CLIENT"))).andExpect(status().isForbidden())
+                .andExpect(jsonPath("code").value("ACCESS_DENIED"));
         mvc.perform(get("/api/kitchens/me/orders").with(user(CLIENT).roles("CLIENT"))).andExpect(status().isForbidden());
         mvc.perform(get("/api/orders").with(user(OWNER).roles("KITCHEN"))).andExpect(status().isForbidden());
         mvc.perform(post("/api/orders/" + order.id() + "/cancel").with(user(CLIENT).roles("CLIENT")))
@@ -460,7 +474,7 @@ class BackendApplicationTests {
         var order = checkout(CLIENT, "ownership-key");
         mvc.perform(patch("/api/kitchens/me/orders/" + order.id() + "/status")
                         .with(user("stranger@example.test").roles("KITCHEN")).with(csrf())
-                        .contentType("application/json").content("{\"status\":\"PREPARING\"}"))
+                        .contentType("application/json").content("{\"status\":\"PREPARING\",\"expectedVersion\":0}"))
                 .andExpect(status().isNotFound());
         mvc.perform(delete("/api/kitchens/me/dishes/" + dishId)
                         .with(user("stranger@example.test").roles("KITCHEN")).with(csrf()))
@@ -485,7 +499,8 @@ class BackendApplicationTests {
                 .andExpect(status().isNoContent());
         String newToken = csrfToken(session);
         mvc.perform(delete("/api/cart").session(session).header("X-CSRF-TOKEN", oldToken))
-                .andExpect(status().isForbidden()).andExpect(header().exists("X-Request-ID"));
+                .andExpect(status().isForbidden()).andExpect(jsonPath("code").value("ACCESS_DENIED"))
+                .andExpect(header().exists("X-Request-ID"));
         mvc.perform(get("/api/auth/me").session(session)).andExpect(status().isOk())
                 .andExpect(jsonPath("email").value(CLIENT));
         mvc.perform(post("/api/auth/logout").session(session).header("X-CSRF-TOKEN", newToken)).andExpect(status().isNoContent());
@@ -523,11 +538,13 @@ class BackendApplicationTests {
         String itemId = com.jayway.jsonpath.JsonPath.read(created, "$.items[0].id");
         mvc.perform(post("/api/orders").with(user(CLIENT).roles("CLIENT")).with(csrf())
                         .header("Idempotency-Key", "http-lifecycle").contentType("application/json").content(body))
-                .andExpect(status().isCreated()).andExpect(jsonPath("id").value(id));
-        for (String next : List.of("PREPARING", "IN_DELIVERY", "COMPLETED")) {
+                .andExpect(status().isOk()).andExpect(jsonPath("id").value(id));
+        long version = 0;
+        for (String next : List.of("PREPARING", "DELIVERING", "COMPLETED")) {
             mvc.perform(patch("/api/kitchens/me/orders/" + id + "/status").with(user(OWNER).roles("KITCHEN")).with(csrf())
-                            .contentType("application/json").content("{\"status\":\"" + next + "\"}"))
-                    .andExpect(status().isOk()).andExpect(jsonPath("status").value(next));
+                            .contentType("application/json").content("{\"status\":\"" + next + "\",\"expectedVersion\":" + version + "}"))
+                    .andExpect(status().isOk()).andExpect(jsonPath("status").value(next))
+                    .andExpect(jsonPath("version").value(++version));
         }
         mvc.perform(post("/api/orders/" + id + "/reviews").with(user(CLIENT).roles("CLIENT")).with(csrf())
                         .contentType("application/json").content("""
@@ -643,16 +660,16 @@ class BackendApplicationTests {
         var request = new OrderCreateRequest("Адрес доставки\n79991111111", "79992222222", "Комментарий",
                 request(dishId).items(), false, null);
         carts.add(CLIENT, new CartItemRequest(dishId, 1, false));
-        var order = orders.create(CLIENT, "legacy-key", request);
+        var order = create(CLIENT, "legacy-key", request);
         String legacy = request.deliveryAddress() + "\n" + request.phone() + "\n" + request.comment()
                 + "\nfalse\n\n" + dishId + ":1";
         String hash = java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256")
                 .digest(legacy.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
         jdbc.update("UPDATE orders SET request_fingerprint = ? WHERE id = ?", hash, order.id());
-        assertThat(orders.create(CLIENT, "legacy-key", request).id()).isEqualTo(order.id());
+        assertThat(create(CLIENT, "legacy-key", request).id()).isEqualTo(order.id());
         var collision = new OrderCreateRequest("Адрес доставки", "79991111111", "79992222222\nКомментарий",
                 request.items(), false, null);
-        conflict("IDEMPOTENCY_KEY_REUSED", () -> orders.create(CLIENT, "legacy-key", collision));
+        conflict("IDEMPOTENCY_KEY_REUSED", () -> create(CLIENT, "legacy-key", collision));
         assertThat(stock()).isEqualTo(9);
     }
 
@@ -718,4 +735,135 @@ class BackendApplicationTests {
         conflict("DISH_NOT_FOUND", () -> recommendations.checkCompatibility(CLIENT, otherDishId));
         mvc.perform(get("/api/dishes")).andExpect(status().isOk()).andExpect(jsonPath("content.length()").value(0));
     }
+    @Test
+    void reservationsFollowOrderLifecycleAndVersionsAdvanceOnce() {
+        var order = checkout(CLIENT, "reservation-lifecycle");
+        assertThat(order.version()).isZero();
+        assertThat(reservationStatus(order)).isEqualTo("ACTIVE");
+        for (OrderStatus next : List.of(OrderStatus.PREPARING, OrderStatus.DELIVERING, OrderStatus.COMPLETED)) {
+            long previous = order.version();
+            order = orders.changeStatusByKitchen(OWNER, order.id(), new OrderStatusRequest(next, previous, null));
+            assertThat(order.version()).isEqualTo(previous + 1);
+            assertThat(reservationStatus(order)).isEqualTo(next == OrderStatus.COMPLETED ? "CONSUMED" : "ACTIVE");
+            assertThat(stock()).isEqualTo(9);
+        }
+        var completed = order;
+        conflict("ORDER_NOT_CANCELLABLE", () -> orders.cancelByCustomer(CLIENT, completed.id(), completed.version()));
+        conflict("INVALID_ORDER_TRANSITION", () -> orders.changeStatusByKitchen(OWNER, completed.id(),
+                new OrderStatusRequest(OrderStatus.CANCELLED, completed.version(), "Поздняя отмена")));
+        assertThat(reservationStatus(order)).isEqualTo("CONSUMED");
+        assertThat(count("order_status_history")).isEqualTo(4);
+    }
+
+    @Test
+    void staleVersionCannotChangeStatusOrReleaseStock() {
+        var order = checkout(CLIENT, "stale-version");
+        var preparing = orders.changeStatusByKitchen(OWNER, order.id(), new OrderStatusRequest(OrderStatus.PREPARING, 0L, null));
+        conflict("ORDER_VERSION_CONFLICT", () -> orders.changeStatusByKitchen(OWNER, order.id(),
+                new OrderStatusRequest(OrderStatus.DELIVERING, 0L, null)));
+        conflict("ORDER_VERSION_CONFLICT", () -> orders.cancelByCustomer(CLIENT, order.id(), 0));
+        assertThat(orders.getMine(CLIENT, order.id()).version()).isEqualTo(preparing.version());
+        assertThat(reservationStatus(order)).isEqualTo("ACTIVE");
+        assertThat(stock()).isEqualTo(9);
+        assertThat(count("order_status_history")).isEqualTo(2);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"{}", "{\"expectedVersion\":-1}", "{\"expectedVersion\":0.5}"})
+    void cancellationRequiresNonNegativeIntegerVersion(String body) throws Exception {
+        var order = checkout(CLIENT, "cancel-input");
+        mvc.perform(post("/api/orders/" + order.id() + "/cancel").with(user(CLIENT).roles("CLIENT")).with(csrf())
+                        .contentType("application/json").content(body))
+                .andExpect(status().isBadRequest());
+        assertThat(reservationStatus(order)).isEqualTo("ACTIVE");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"CLIENT", "KITCHEN"})
+    void cancellationEndpointSupportsBothOwnersAndReturnsNewVersion(String role) throws Exception {
+        var order = checkout(CLIENT, "http-cancel");
+        var actor = user(role.equals("CLIENT") ? CLIENT : OWNER).roles(role);
+        mvc.perform(post("/api/orders/" + order.id() + "/cancel").with(actor).with(csrf())
+                        .contentType("application/json").content("{\"expectedVersion\":0,\"reason\":\"Нет продуктов\"}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("status").value("CANCELLED"))
+                .andExpect(jsonPath("version").value(1));
+        mvc.perform(post("/api/orders/" + order.id() + "/cancel").with(actor).with(csrf())
+                        .contentType("application/json").content("{\"expectedVersion\":0,\"reason\":\"Повтор\"}"))
+                .andExpect(status().isConflict()).andExpect(jsonPath("code").value("ORDER_VERSION_CONFLICT"))
+                .andExpect(jsonPath("currentVersion").value(1));
+        assertThat(reservationStatus(order)).isEqualTo("RELEASED");
+        assertThat(stock()).isEqualTo(10);
+    }
+
+    @Test
+    void kitchenCancelRequiresReasonAndOwnership() throws Exception {
+        var order = checkout(CLIENT, "kitchen-cancel");
+        mvc.perform(post("/api/orders/" + order.id() + "/cancel").with(user(OWNER).roles("KITCHEN")).with(csrf())
+                        .contentType("application/json").content("{\"expectedVersion\":0}"))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("code").value("CANCELLATION_REASON_REQUIRED"));
+        UUID otherOwner = insertUser("foreign-kitchen@example.test", "KITCHEN");
+        jdbc.update("""
+                INSERT INTO kitchens(id, owner_id, name, description, contacts, delivery_area, status, accepting_orders, created_at)
+                VALUES (?, ?, 'Чужая', 'Описание', 'Контакты', 'Район', 'APPROVED', true, now())
+                """, UUID.randomUUID(), otherOwner);
+        mvc.perform(post("/api/orders/" + order.id() + "/cancel").with(user("foreign-kitchen@example.test").roles("KITCHEN")).with(csrf())
+                        .contentType("application/json").content("{\"expectedVersion\":0,\"reason\":\"Причина\"}"))
+                .andExpect(status().isNotFound());
+        assertThat(reservationStatus(order)).isEqualTo("ACTIVE");
+    }
+
+    @Test
+    void cancellationRollsBackStockReservationVersionAndHistoryOnFailure() {
+        var order = checkout(CLIENT, "cancel-rollback");
+        jdbc.execute("""
+                CREATE FUNCTION fail_cancel_history() RETURNS trigger LANGUAGE plpgsql AS $$
+                BEGIN RAISE EXCEPTION 'injected cancellation failure'; END $$
+                """);
+        jdbc.execute("CREATE TRIGGER fail_cancel_history BEFORE INSERT ON order_status_history FOR EACH ROW EXECUTE FUNCTION fail_cancel_history()");
+        try {
+            assertThatThrownBy(() -> orders.cancelByCustomer(CLIENT, order.id(), order.version()))
+                    .isInstanceOf(RuntimeException.class).hasStackTraceContaining("injected cancellation failure");
+            assertThat(stock()).isEqualTo(9);
+            assertThat(reservationStatus(order)).isEqualTo("ACTIVE");
+            assertThat(orders.getMine(CLIENT, order.id()).version()).isZero();
+            assertThat(orders.getMine(CLIENT, order.id()).status()).isEqualTo(OrderStatus.CREATED);
+            assertThat(count("order_status_history")).isEqualTo(1);
+        } finally {
+            jdbc.execute("DROP TRIGGER fail_cancel_history ON order_status_history");
+            jdbc.execute("DROP FUNCTION fail_cancel_history()");
+        }
+        orders.cancelByCustomer(CLIENT, order.id(), 0);
+        assertThat(reservationStatus(order)).isEqualTo("RELEASED");
+    }
+
+    @Test
+    void failedLoginReturnsStructuredErrorWithoutCredentials() throws Exception {
+        mvc.perform(post("/api/auth/login").with(csrf())
+                        .contentType("application/x-www-form-urlencoded")
+                        .param("email", CLIENT).param("password", "wrong-password"))
+                .andExpect(status().isUnauthorized()).andExpect(jsonPath("code").value("AUTHENTICATION_REQUIRED"))
+                .andExpect(jsonPath("message").isString())
+                .andExpect(content().string(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("wrong-password"))));
+    }
+
+    @Test
+    void onlyOwnerCanReadHiddenReviewsOfTheirOrder() throws Exception {
+        var order = checkout(CLIENT, "own-hidden-review");
+        complete(order);
+        var review = reviews.create(CLIENT, order.id(), new OrderReviewRequest(List.of(
+                new ReviewItemRequest(order.items().getFirst().id(), 5, true, "Текст автора")))).getFirst();
+        reviews.hide(ADMIN, review.id(), "Причина модерации");
+        String path = "/api/orders/" + order.id() + "/reviews";
+        mvc.perform(get(path).with(user(CLIENT).roles("CLIENT")))
+                .andExpect(status().isOk()).andExpect(jsonPath("$[0].id").value(review.id().toString()))
+                .andExpect(jsonPath("$[0].status").value("HIDDEN"))
+                .andExpect(jsonPath("$[0].moderationReason").value("Причина модерации"));
+        mvc.perform(get(path).with(user(OTHER).roles("CLIENT"))).andExpect(status().isNotFound());
+        mvc.perform(get(path).with(user(OWNER).roles("KITCHEN"))).andExpect(status().isForbidden());
+        mvc.perform(get(path)).andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/dishes/" + dishId + "/reviews"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(0));
+        assertThat(reviewQueries.summary(dishId).reviewCount()).isZero();
+    }
+
 }

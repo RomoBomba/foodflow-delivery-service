@@ -120,10 +120,11 @@ function OrderDetail({ order, kitchen, onChanged }: { order: Order; kitchen?: st
   const cancel = async () => {
     setBusy(true);
     try {
-      await ordersApi.cancel(order.id);
+      await ordersApi.cancel(order.id, order.version);
       toast('Заказ отменён, порции возвращены кухне', 'ok');
     } catch (error) {
       toast(
+        isApiError(error, 'ORDER_VERSION_CONFLICT') ? 'Заказ изменился. Проверьте обновлённую карточку.' :
         isApiError(error, 'ORDER_NOT_CANCELLABLE') ? 'Кухня уже приняла заказ — отменить его нельзя.' : errorText(error),
         'danger',
       );
@@ -211,7 +212,7 @@ function OrderDetail({ order, kitchen, onChanged }: { order: Order; kitchen?: st
           {order.status === 'COMPLETED' && (
             <Link className="btn primary" to={`/orders/${order.id}/review`}>Оценить блюда</Link>
           )}
-          {(order.status === 'PREPARING' || order.status === 'IN_DELIVERY') && (
+          {(order.status === 'PREPARING' || order.status === 'DELIVERING') && (
             <p className="small muted">Кухня уже готовит заказ — отменить его нельзя.</p>
           )}
         </section>

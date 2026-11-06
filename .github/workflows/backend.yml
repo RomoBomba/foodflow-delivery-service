@@ -5,7 +5,9 @@ on:
   pull_request:
     paths:
       - 'backend/**'
-      - 'compose.yaml'
+      - 'compose*.yaml'
+      - 'deploy/**'
+      - 'scripts/**'
       - '.github/workflows/backend.yml'
 permissions:
   contents: read

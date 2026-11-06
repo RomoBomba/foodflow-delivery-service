@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ApiError, isApiError } from '../api/client';
-import { catalogApi, ordersApi } from '../api/endpoints';
+import { ordersApi } from '../api/endpoints';
 import type { Order, Review, ReviewItemRequest } from '../api/types';
 import { useToast } from '../components/toast';
 import { Alert, DishPhoto, Empty, ErrorAlert, Loading, OrderStatusBadge } from '../components/ui';
@@ -17,7 +17,7 @@ interface ItemDraft {
 
 interface Loaded {
   order: Order;
-  /** Уже опубликованные отзывы по позициям этого заказа (отдельного эндпоинта нет — берём публичные отзывы блюд). */
+  /** Свои отзывы, включая скрытые: повторная оценка такой позиции запрещена. */
   existing: Map<string, Review>;
 }
 
@@ -28,13 +28,8 @@ export function ReviewPage() {
   const { kitchenName } = useDictionaries();
   const data = useAsync<Loaded>(async () => {
     const order = await ordersApi.get(orderId);
-    const itemIds = new Set(order.items.map((i) => i.id));
-    const dishIds = [...new Set(order.items.map((i) => i.dishId))];
-    const lists = await Promise.all(dishIds.map((dishId) => catalogApi.reviews(dishId).catch(() => [] as Review[])));
-    const existing = new Map<string, Review>();
-    lists.flat().forEach((review) => {
-      if (itemIds.has(review.orderItemId)) existing.set(review.orderItemId, review);
-    });
+    const reviews = await ordersApi.reviews(orderId);
+    const existing = new Map(reviews.map((review) => [review.orderItemId, review]));
     return { order, existing };
   }, [orderId]);
   const [drafts, setDrafts] = useState<Record<string, ItemDraft>>({});
@@ -126,6 +121,11 @@ export function ReviewPage() {
                     <div className="done-box mt-8">
                       <span className="stars">{'★'.repeat(done.rating)}{'☆'.repeat(5 - done.rating)}</span> · Заказали бы снова: {done.reordered ? 'да' : 'нет'}
                       {done.text && <> · «{done.text}»</>}
+                      {done.status === 'HIDDEN' && (
+                        <div className="mt-8"><Alert tone="info" title="Отзыв скрыт модератором.">
+                          {done.moderationReason} Повторно оценить эту позицию нельзя.
+                        </Alert></div>
+                      )}
                       <div className="tiny muted mt-8">Отзыв оставлен {formatDate(done.createdAt)} · повторно оценить позицию нельзя</div>
                     </div>
                   ) : (
@@ -189,7 +189,7 @@ export function ReviewPage() {
             </div>
           ) : (
             <div className="mt-16">
-              <Alert tone="ok" title={sent ? 'Отзывы отправлены.' : 'Все блюда оценены.'}>Спасибо! Оценки учтены в карточках блюд.</Alert>
+              <Alert tone="ok" title={sent ? 'Отзывы отправлены.' : 'Все блюда оценены.'}>В публичном рейтинге учитываются только видимые отзывы.</Alert>
             </div>
           )}
           <div className="mt-12"><ErrorAlert error={submitError} /></div>

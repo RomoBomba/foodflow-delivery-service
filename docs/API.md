@@ -2,6 +2,8 @@
 
 Базовый адрес локального backend — `http://localhost:8080`. UUID передаются строками. Даты — ISO 8601 UTC. Денежные поля JSON — числа в рублях; итог рассчитывает сервер. Пользовательские тексты следует выводить как текст, без `dangerouslySetInnerHTML`.
 
+Для локальной разработки настройте запуск из [README](../README.md). На HTTPS-стенде frontend и API доступны с одного origin через Nginx.
+
 ## Сессия и CSRF
 
 1. `GET /api/auth/csrf` возвращает `{ "token": "...", "headerName": "X-CSRF-TOKEN" }` и создаёт сессию.
@@ -111,19 +113,23 @@ POST **прибавляет** количество; PATCH **задаёт** ег�
 
 При `409 PRICE_CHANGED` ответ содержит `code,message,updatedTotal,updatedPriceFingerprint,items`. Элементы `items`: `{dishId,dishName,quantity,previousUnitPrice,currentUnitPrice,currentLineTotal}` — только изменившиеся позиции. После явного согласия отправьте `acceptCurrentPrices:true` и `confirmedPriceFingerprint` из **последнего** расчёта. Если цены поменялись снова, сервер вернёт новый 409. Не подтверждайте его автоматически.
 
-Успех и успешный повтор возвращают **201 с тем же заказом**. После сетевой ошибки повторите тот же ключ и то же тело. Не генерируйте новый ключ, пока исход предыдущей попытки неизвестен. После успешно созданного заказа изменение реквизитов, позиций или полей подтверждения с тем же ключом даёт `409 IDEMPOTENCY_KEY_REUSED`. После бизнес-отказа, при котором заказ не создан, ключ можно использовать для исправленного запроса.
+Первое успешное оформление возвращает **201**, успешный повтор — **200 с тем же заказом**. После сетевой ошибки, обрыва ответа или 5xx исход оформления может быть неизвестен: сохраните ключ и тело до отправки, затем повторите их без изменений. Возможность такого повтора должна сохраняться после перезагрузки даже при пустой корзине. Черновики и попытки в браузере храните отдельно для каждого пользователя. Не генерируйте новый ключ, пока исход предыдущей попытки неизвестен. После успешно созданного заказа изменение реквизитов, позиций или полей подтверждения с тем же ключом даёт `409 IDEMPOTENCY_KEY_REUSED`. После бизнес-отказа, при котором заказ не создан, ключ можно использовать для исправленного запроса.
 
-Заказ: `{id,orderNumber,customerId,kitchenId,deliveryAddress,phone,paymentMethod,comment,status,totalPrice,cancellationReason,createdAt,updatedAt,items,history}`. `paymentMethod=CASH_ON_DELIVERY`; `orderNumber` сейчас совпадает с UUID. Позиция: `{id,dishId,dishName,unitPrice,quantity,lineTotal,weightGrams,kcalPerPortion}`. История: `{id,fromStatus,toStatus,actorId,reason,createdAt}`. Снимки позиций не меняются при редактировании меню.
+Заказ: `{id,orderNumber,customerId,kitchenId,deliveryAddress,phone,paymentMethod,comment,status,version,totalPrice,cancellationReason,createdAt,updatedAt,items,history}`. `paymentMethod=CASH_ON_DELIVERY`; `orderNumber` сейчас совпадает с UUID. Позиция: `{id,dishId,dishName,unitPrice,quantity,lineTotal,weightGrams,kcalPerPortion}`. История: `{id,fromStatus,toStatus,actorId,reason,createdAt}`. Снимки позиций не меняются при редактировании меню.
 
 | Метод | URL | Доступ / тело |
 | --- | --- | --- |
 | GET | `/api/orders` | CLIENT; массив своих заказов, новые первыми |
 | GET | `/api/orders/{id}` | CLIENT; свой заказ, иначе 404 |
-| POST | `/api/orders/{id}/cancel` | CLIENT; без тела, только CREATED |
+| POST | `/api/orders/{id}/cancel` | CLIENT/KITCHEN; `{expectedVersion:0,reason:null}`, только CREATED; свой заказ / заказ своей кухни |
 | GET | `/api/kitchens/me/orders` | KITCHEN; массив заказов своей кухни |
-| PATCH | `/api/kitchens/me/orders/{id}/status` | KITCHEN; `{status:"PREPARING",reason:null}` |
+| PATCH | `/api/kitchens/me/orders/{id}/status` | KITCHEN; `{status:"PREPARING",expectedVersion:0,reason:null}` |
 
-Допустимые переходы: CREATED → PREPARING → IN_DELIVERY → COMPLETED; из CREATED также CANCELLED. Кухне для CANCELLED нужна непустая причина ≤500 символов. Повтор отмены даёт 409 и не возвращает порции снова. Обновляйте открытый список заказов раз в 15 секунд; WebSocket отсутствует. Списки заказов пока без пагинации.
+`version` — целое число, у нового заказа 0. Для отмены и любой смены статуса передавайте `expectedVersion` из последнего полученного заказа. Успех — 200 с обновлённым заказом и увеличенной на 1 версией. Несовпадение даёт `409 ORDER_VERSION_CONFLICT` с `currentVersion` на верхнем уровне JSON; перечитайте заказ и предложите действие заново. Не повторяйте изменение автоматически с новой версией. Пропущенная, отрицательная или дробная версия — 400.
+
+Пример отмены клиентом: `POST /api/orders/{id}/cancel` с `{"expectedVersion":0}`. Кухня использует тот же маршрут с `{"expectedVersion":0,"reason":"Нет продуктов"}` либо PATCH своего заказа в CANCELLED. Сервер проверяет роль, владельца и версию; чужой заказ — 404.
+
+Допустимые переходы: CREATED → PREPARING → DELIVERING → COMPLETED; из CREATED также CANCELLED. Кухне для CANCELLED нужна непустая причина ≤500 символов. Повтор отмены даёт 409 и не возвращает порции снова. Обновляйте открытый список заказов раз в 15 секунд; WebSocket отсутствует. Списки заказов пока без пагинации.
 
 ## Отзывы
 
@@ -137,15 +143,16 @@ POST **прибавляет** количество; PATCH **задаёт** ег�
 
 От 1 до 30 позиций, оценка — целое 1–5, `reordered` обязателен, текст необязателен и ≤1000 символов. Только свой COMPLETED-заказ; один отзыв на позицию. Скрытие не разрешает оставлять повторный отзыв.
 
+- `GET /api/orders/{orderId}/reviews` — CLIENT, свои отзывы этого заказа, включая скрытые и причину модерации; чужой заказ — 404. Используйте для отметки уже оценённых позиций: скрытие не разрешает повторную оценку.
 - `GET /api/dishes/{dishId}/reviews` — публичные видимые отзывы.
 - `GET /api/kitchens/me/reviews` — видимые отзывы на блюда своей кухни.
 - `GET /api/admin/reviews?visible=true|false` — ADMIN, без фильтра все.
 - `POST /api/admin/reviews/{reviewId}/hide` — ADMIN; `{reason:"Причина"}`, непустая строка ≤500.
 
-Ответы создания и списков — массивы. Элемент: `{id,orderId,orderItemId,dishId,rating,reordered,text,visible,moderationReason,moderatedBy,moderatedAt,createdAt}`. Скрытие возвращает один объект. Агрегаты находятся в карточках каталога и пересчитываются по видимым отзывам.
+Ответы создания и списков — массивы. Элемент: `{id,orderId,orderItemId,dishId,rating,reordered,text,visible,status,moderationReason,moderatedBy,moderatedAt,createdAt}`. `status` — VISIBLE или HIDDEN; `visible` равно `status === "VISIBLE"`. Скрытие возвращает один объект. Агрегаты находятся в карточках каталога и пересчитываются по видимым отзывам.
 
 ## Ошибки и диагностика
 
-400 — неверные поля, JSON или параметры; 401 — нужен вход; 403 — роль или CSRF; 404 — объект отсутствует либо чужой; 409 — бизнес-конфликт. Ошибки прикладных контроллеров содержат `code,message`, иногда `fields` или дополнительные поля расчёта. Ответы 401/403 Spring Security могут быть без JSON — frontend должен это учитывать. `X-Request-ID` позволяет сопоставить ответ с журналом, включая отказы Security.
+400 — неверные поля, JSON или параметры; 401 — нужен вход; 403 — роль или CSRF; 404 — объект отсутствует либо чужой; 409 — бизнес-конфликт. Ошибки прикладных контроллеров содержат `code,message`, иногда `fields` или дополнительные поля расчёта. Spring Security возвращает тот же формат: 401 — `AUTHENTICATION_REQUIRED`, 403 — `ACCESS_DENIED`. При 401 откройте вход; при 403 проверьте актуальность CSRF и доступную роль. Сетевые ошибки и ответы прокси могут не содержать JSON. `X-Request-ID` позволяет сопоставить ответ с журналом, включая отказы Security.
 
-Основные коды для корзины/заказов: `CART_EMPTY`, `CART_CHANGED`, `CART_KITCHEN_MISMATCH`, `CART_ITEMS_LIMIT`, `CART_QUANTITY_LIMIT`, `KITCHEN_CLOSED`, `DISH_ARCHIVED`, `DISH_UNAVAILABLE`, `INSUFFICIENT_STOCK`, `EXCLUDED_INGREDIENT`, `PRICE_CHANGED`, `IDEMPOTENCY_KEY_REUSED`, `ORDER_NOT_CANCELLABLE`, `INVALID_ORDER_TRANSITION`. Для отзывов: `ORDER_NOT_COMPLETED`, `REVIEW_ALREADY_EXISTS`, `REVIEW_ITEM_NOT_IN_ORDER`, `REVIEW_ALREADY_HIDDEN`. Некорректный JSON, заголовки и типы параметров: `INVALID_REQUEST`; ошибки DTO: `VALIDATION_ERROR` с `fields`.
+Основные коды для корзины/заказов: `CART_EMPTY`, `CART_CHANGED`, `CART_KITCHEN_MISMATCH`, `CART_ITEMS_LIMIT`, `CART_QUANTITY_LIMIT`, `KITCHEN_CLOSED`, `DISH_ARCHIVED`, `DISH_UNAVAILABLE`, `INSUFFICIENT_STOCK`, `EXCLUDED_INGREDIENT`, `PRICE_CHANGED`, `IDEMPOTENCY_KEY_REUSED`, `ORDER_NOT_CANCELLABLE`, `ORDER_VERSION_CONFLICT`, `INVALID_ORDER_TRANSITION`. Для отзывов: `ORDER_NOT_COMPLETED`, `REVIEW_ALREADY_EXISTS`, `REVIEW_ITEM_NOT_IN_ORDER`, `REVIEW_ALREADY_HIDDEN`. Некорректный JSON, заголовки и типы параметров: `INVALID_REQUEST`; ошибки DTO: `VALIDATION_ERROR` с `fields`.

@@ -1,16 +1,12 @@
 package com.foodflow.feedback;
 
 import com.foodflow.catalog.dish.Dish;
-import com.foodflow.catalog.dish.DishRepository;
+import com.foodflow.catalog.CatalogQueryService;
 import com.foodflow.catalog.kitchen.Kitchen;
-import com.foodflow.catalog.kitchen.KitchenRepository;
 import com.foodflow.common.ApiException;
 import com.foodflow.identity.IdentityQueryService;
-import com.foodflow.ordering.CustomerOrder;
 import com.foodflow.ordering.OrderItem;
-import com.foodflow.ordering.OrderItemRepository;
-import com.foodflow.ordering.OrderRepository;
-import com.foodflow.ordering.OrderStatus;
+import com.foodflow.ordering.OrderQueryService;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -27,37 +23,26 @@ import java.util.stream.Collectors;
 @Service
 public class ReviewService {
     private final ReviewRepository reviewRepository;
-    private final OrderRepository orderRepository;
-    private final OrderItemRepository orderItemRepository;
-    private final DishRepository dishRepository;
-    private final KitchenRepository kitchenRepository;
+    private final OrderQueryService orders;
+    private final CatalogQueryService catalog;
     private final IdentityQueryService identityQueryService;
 
     public ReviewService(
             ReviewRepository reviewRepository,
-            OrderRepository orderRepository,
-            OrderItemRepository orderItemRepository,
-            DishRepository dishRepository,
-            KitchenRepository kitchenRepository,
+            OrderQueryService orders,
+            CatalogQueryService catalog,
             IdentityQueryService identityQueryService
     ) {
         this.reviewRepository = reviewRepository;
-        this.orderRepository = orderRepository;
-        this.orderItemRepository = orderItemRepository;
-        this.dishRepository = dishRepository;
-        this.kitchenRepository = kitchenRepository;
+        this.orders = orders;
+        this.catalog = catalog;
         this.identityQueryService = identityQueryService;
     }
 
     @Transactional
     public List<ReviewResponse> create(String email, UUID orderId, OrderReviewRequest request) {
         UUID userId = identityQueryService.getUserId(email);
-        CustomerOrder order = orderRepository.findByIdAndCustomerForUpdate(orderId, userId)
-                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "ORDER_NOT_FOUND", "Заказ не найден"));
-        if (order.getStatus() != OrderStatus.COMPLETED) {
-            throw new ApiException(HttpStatus.CONFLICT, "ORDER_NOT_COMPLETED", "Оставить отзыв можно только по выполненному заказу");
-        }
-        List<OrderItem> orderItems = orderItemRepository.findAllByOrderId(orderId);
+        List<OrderItem> orderItems = orders.completedItemsForReview(orderId, userId);
         Map<UUID, OrderItem> byId = orderItems.stream().collect(Collectors.toMap(OrderItem::getId, Function.identity()));
         Set<UUID> supplied = new HashSet<>();
         List<Review> saved = new ArrayList<>();
@@ -82,23 +67,31 @@ public class ReviewService {
     }
 
     @Transactional(readOnly = true)
+    public List<ReviewResponse> findForOwnOrder(String email, UUID orderId) {
+        UUID userId = identityQueryService.getUserId(email);
+        orders.requireOwnedOrder(orderId, userId);
+        return reviewRepository.findAllByOrderIdAndUserIdOrderByCreatedAtDesc(orderId, userId)
+                .stream().map(ReviewResponse::from).toList();
+    }
+
+    @Transactional(readOnly = true)
     public List<ReviewResponse> findVisibleByDish(UUID dishId) {
-        if (!dishRepository.existsById(dishId)) {
+        if (!catalog.dishExists(dishId)) {
             throw new ApiException(HttpStatus.NOT_FOUND, "DISH_NOT_FOUND", "Блюдо не найдено");
         }
-        return reviewRepository.findAllByDishIdAndVisibleTrueOrderByCreatedAtDesc(dishId)
+        return reviewRepository.findAllByDishIdAndStatusOrderByCreatedAtDesc(dishId, ReviewStatus.VISIBLE)
                 .stream().map(ReviewResponse::from).toList();
     }
 
     @Transactional(readOnly = true)
     public List<ReviewResponse> findKitchenReviews(String email) {
         UUID ownerId = identityQueryService.getUserId(email);
-        Kitchen kitchen = kitchenRepository.findByOwnerId(ownerId)
+        Kitchen kitchen = catalog.findOwnedKitchen(ownerId)
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "KITCHEN_NOT_FOUND", "Кухня не найдена"));
-        List<UUID> dishIds = dishRepository.findAllByKitchenIdOrderByCreatedAtDesc(kitchen.getId())
+        List<UUID> dishIds = catalog.menu(kitchen.getId())
                 .stream().map(Dish::getId).toList();
         if (dishIds.isEmpty()) return List.of();
-        return reviewRepository.findAllByDishIdInAndVisibleTrueOrderByCreatedAtDesc(dishIds)
+        return reviewRepository.findAllByDishIdInAndStatusOrderByCreatedAtDesc(dishIds, ReviewStatus.VISIBLE)
                 .stream().map(ReviewResponse::from).toList();
     }
 
@@ -106,7 +99,7 @@ public class ReviewService {
     public List<ReviewResponse> findForAdmin(Boolean visible) {
         List<Review> reviews = visible == null
                 ? reviewRepository.findAllByOrderByCreatedAtDesc()
-                : reviewRepository.findAllByVisibleOrderByCreatedAtDesc(visible);
+                : reviewRepository.findAllByStatusOrderByCreatedAtDesc(visible ? ReviewStatus.VISIBLE : ReviewStatus.HIDDEN);
         return reviews.stream().map(ReviewResponse::from).toList();
     }
 

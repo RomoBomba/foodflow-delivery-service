@@ -107,3 +107,36 @@ describe('api client', () => {
     expect(calls[1]!.init.body).toBe('email=a%40b.test&password=p%40ss+word');
   });
 });
+
+describe('актуальный контракт Security и потерянный ответ', () => {
+  it('обновляет CSRF при JSON ACCESS_DENIED, но не повторяет второй отказ', async () => {
+    queue.push(() => json(200, { token: 'old', headerName: 'X-CSRF-TOKEN' }));
+    queue.push(() => json(403, { code: 'ACCESS_DENIED' }));
+    queue.push(() => json(200, { token: 'new', headerName: 'X-CSRF-TOKEN' }));
+    queue.push(() => json(403, { code: 'ACCESS_DENIED' }));
+    await expect(api('/api/cart', { method: 'DELETE' })).rejects.toMatchObject({ status: 403 });
+    expect(calls).toHaveLength(4);
+    expect(headerOf(calls[3]!, 'X-CSRF-TOKEN')).toBe('new');
+  });
+
+  it('не повторяет прикладной 403 с другим кодом', async () => {
+    queue.push(() => json(200, { token: 't', headerName: 'X-CSRF-TOKEN' }));
+    queue.push(() => json(403, { code: 'BUSINESS_REJECTION' }));
+    await expect(api('/api/orders', { method: 'POST' })).rejects.toMatchObject({ code: 'BUSINESS_REJECTION' });
+    expect(calls).toHaveLength(2);
+  });
+
+  it('считает успешный ответ с оборванным JSON неизвестным результатом', async () => {
+    queue.push(() => json(200, { token: 't', headerName: 'X-CSRF-TOKEN' }));
+    queue.push(() => new Response('{"id":', { status: 201 }));
+    await expect(api('/api/orders', { method: 'POST' })).rejects.toBeInstanceOf(NetworkError);
+  });
+
+  it('принимает как 201, так и 200 для результата оформления', async () => {
+    queue.push(() => json(200, { token: 't', headerName: 'X-CSRF-TOKEN' }));
+    queue.push(() => json(201, { id: 'order-1' }));
+    queue.push(() => json(200, { id: 'order-1' }));
+    const options = { method: 'POST' as const, headers: { 'Idempotency-Key': 'same-key' } };
+    expect(await api('/api/orders', options)).toEqual(await api('/api/orders', options));
+  });
+});

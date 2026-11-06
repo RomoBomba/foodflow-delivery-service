@@ -140,7 +140,9 @@ async function send(path: string, options: RequestOptions, csrfToken: CsrfToken 
 
 async function readBody(response: Response): Promise<unknown> {
   if (response.status === 204) return undefined;
-  const text = await response.text();
+  let text: string;
+  try { text = await response.text(); }
+  catch { throw new NetworkError(); }
   if (!text) return undefined;
   try {
     return JSON.parse(text);
@@ -154,12 +156,15 @@ export async function api<T>(path: string, options: RequestOptions = {}): Promis
   const mutating = method !== 'GET';
   let response = await send(path, options, mutating ? await getCsrf() : null);
 
-  // 403 без тела после смены сессии чаще всего означает устаревший CSRF-токен:
-  // получаем новый и повторяем запрос один раз. Повтор безопасен — сервер отклонил
-  // исходный запрос до выполнения бизнес-логики.
+  // Security отклоняет запрос до бизнес-логики: обновляем CSRF и пробуем один раз.
+  // ACCESS_DENIED также может означать запрет роли; второй 403 отдаём вызывающему коду.
   if (mutating && response.status === 403) {
     const probe = await response.clone().text();
-    if (!probe) {
+    let securityRejection = !probe;
+    try {
+      securityRejection ||= JSON.parse(probe).code === 'ACCESS_DENIED';
+    } catch { /* неизвестный ответ прокси не повторяем */ }
+    if (securityRejection) {
       response = await send(path, options, await getCsrf(true));
     }
   }
@@ -173,6 +178,7 @@ export async function api<T>(path: string, options: RequestOptions = {}): Promis
     const errorBody: ApiErrorBody = body && typeof body === 'object' ? (body as ApiErrorBody) : {};
     throw new ApiError(response.status, errorBody, response.headers.get('X-Request-ID'));
   }
+  if (response.status !== 204 && body === undefined) throw new NetworkError();
   return body as T;
 }
 

@@ -115,7 +115,7 @@ export interface Cart {
   updatedAt: Instant | null;
 }
 
-export type OrderStatus = 'CREATED' | 'PREPARING' | 'IN_DELIVERY' | 'COMPLETED' | 'CANCELLED';
+export type OrderStatus = 'CREATED' | 'PREPARING' | 'DELIVERING' | 'COMPLETED' | 'CANCELLED';
 
 export interface OrderItem {
   id: UUID;
@@ -147,6 +147,7 @@ export interface Order {
   paymentMethod: string;
   comment: string | null;
   status: OrderStatus;
+  version: number;
   totalPrice: number;
   cancellationReason: string | null;
   createdAt: Instant;
@@ -188,6 +189,7 @@ export interface Review {
   reordered: boolean;
   text: string | null;
   visible: boolean;
+  status: 'VISIBLE' | 'HIDDEN';
   moderationReason: string | null;
   moderatedBy: UUID | null;
   moderatedAt: Instant | null;

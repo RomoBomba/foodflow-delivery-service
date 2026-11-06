@@ -27,6 +27,11 @@ public class IdentityQueryService {
     }
 
     @Transactional
+    public void lockUser(UUID userId) {
+        repository.findByIdForUpdate(userId).orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED));
+    }
+
+    @Transactional
     public void grantKitchenRole(UUID userId) {
         User user = repository.findById(userId)
                 .orElseThrow(() -> new ResponseStatusException(

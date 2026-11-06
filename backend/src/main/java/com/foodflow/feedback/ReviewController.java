@@ -24,6 +24,11 @@ public class ReviewController {
         return service.create(authentication.getName(), orderId, request);
     }
 
+    @GetMapping("/api/orders/{orderId}/reviews")
+    public List<ReviewResponse> ownReviews(Authentication authentication, @PathVariable UUID orderId) {
+        return service.findForOwnOrder(authentication.getName(), orderId);
+    }
+
     @GetMapping("/api/dishes/{dishId}/reviews")
     public List<ReviewResponse> publicReviews(@PathVariable UUID dishId) {
         return service.findVisibleByDish(dishId);

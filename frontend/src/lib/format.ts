@@ -55,7 +55,7 @@ export function countLabel(count: number, forms: [string, string, string]): stri
 export const ORDER_STATUS_LABEL: Record<OrderStatus, string> = {
   CREATED: 'Создан',
   PREPARING: 'Готовится',
-  IN_DELIVERY: 'В доставке',
+  DELIVERING: 'В доставке',
   COMPLETED: 'Выполнен',
   CANCELLED: 'Отменён',
 };
@@ -63,12 +63,12 @@ export const ORDER_STATUS_LABEL: Record<OrderStatus, string> = {
 export const ORDER_STATUS_CLASS: Record<OrderStatus, string> = {
   CREATED: 's-created',
   PREPARING: 's-preparing',
-  IN_DELIVERY: 's-delivery',
+  DELIVERING: 's-delivery',
   COMPLETED: 's-completed',
   CANCELLED: 's-cancelled',
 };
 
-export const ORDER_FLOW: OrderStatus[] = ['CREATED', 'PREPARING', 'IN_DELIVERY', 'COMPLETED'];
+export const ORDER_FLOW: OrderStatus[] = ['CREATED', 'PREPARING', 'DELIVERING', 'COMPLETED'];
 
 export const KITCHEN_STATUS_LABEL: Record<KitchenStatus, string> = {
   PENDING: 'На проверке',

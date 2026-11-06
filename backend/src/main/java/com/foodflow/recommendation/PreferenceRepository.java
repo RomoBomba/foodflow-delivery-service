@@ -1,4 +1,4 @@
-package com.foodflow.preferences;
+package com.foodflow.recommendation;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 

@@ -5,6 +5,8 @@ on:
   pull_request:
     paths:
       - 'frontend/**'
+      - 'compose*.yaml'
+      - 'deploy/**'
       - '.github/workflows/frontend.yml'
 permissions:
   contents: read

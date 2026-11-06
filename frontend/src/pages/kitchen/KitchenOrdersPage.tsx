@@ -11,14 +11,14 @@ import { POLL_INTERVAL_MS, RefreshInfo } from '../OrdersPage';
 /** Следующий шаг по таблице FR-16 и подпись кнопки. */
 const NEXT: Partial<Record<OrderStatus, { to: OrderStatus; label: string }>> = {
   CREATED: { to: 'PREPARING', label: 'Принять' },
-  PREPARING: { to: 'IN_DELIVERY', label: 'Передать в доставку' },
-  IN_DELIVERY: { to: 'COMPLETED', label: 'Заказ получен' },
+  PREPARING: { to: 'DELIVERING', label: 'Передать в доставку' },
+  DELIVERING: { to: 'COMPLETED', label: 'Заказ получен' },
 };
 
 const COLUMNS: { title: string; statuses: OrderStatus[]; cls: string }[] = [
   { title: 'Новые', statuses: ['CREATED'], cls: 's-created' },
   { title: 'Готовится', statuses: ['PREPARING'], cls: 's-preparing' },
-  { title: 'В доставке', statuses: ['IN_DELIVERY'], cls: 's-delivery' },
+  { title: 'В доставке', statuses: ['DELIVERING'], cls: 's-delivery' },
   { title: 'Завершены', statuses: ['COMPLETED', 'CANCELLED'], cls: 's-completed' },
 ];
 
@@ -36,10 +36,10 @@ export function KitchenOrdersPage() {
   const change = async (order: Order, status: OrderStatus, reason: string | null = null) => {
     setBusy(order.id);
     try {
-      await kitchenApi.changeStatus(order.id, status, reason);
+      await kitchenApi.changeStatus(order.id, status, order.version, reason);
       toast(status === 'CANCELLED' ? 'Заказ отклонён, порции возвращены в остаток' : 'Статус обновлён', 'ok');
     } catch (error) {
-      if (isApiError(error, 'INVALID_ORDER_TRANSITION')) {
+      if (isApiError(error, 'INVALID_ORDER_TRANSITION') || isApiError(error, 'ORDER_VERSION_CONFLICT')) {
         toast('Заказ уже изменился (например, клиент отменил его). Карточка обновлена.', 'warn');
       } else {
         toast(errorText(error), 'danger');

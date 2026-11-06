@@ -15,10 +15,12 @@ public interface ReviewRepository extends JpaRepository<Review, UUID> {
     @Query("select r from Review r where r.id = :id")
     Optional<Review> findByIdForUpdate(@Param("id") UUID id);
 
+    List<Review> findAllByOrderIdAndUserIdOrderByCreatedAtDesc(UUID orderId, UUID userId);
+
     boolean existsByOrderItemId(UUID orderItemId);
-    List<Review> findAllByDishIdAndVisibleTrueOrderByCreatedAtDesc(UUID dishId);
-    List<Review> findAllByDishIdInAndVisibleTrueOrderByCreatedAtDesc(List<UUID> dishIds);
-    List<Review> findAllByVisibleOrderByCreatedAtDesc(boolean visible);
+    List<Review> findAllByDishIdAndStatusOrderByCreatedAtDesc(UUID dishId, ReviewStatus status);
+    List<Review> findAllByDishIdInAndStatusOrderByCreatedAtDesc(List<UUID> dishIds, ReviewStatus status);
+    List<Review> findAllByStatusOrderByCreatedAtDesc(ReviewStatus status);
     List<Review> findAllByOrderByCreatedAtDesc();
 
     @Query("""
@@ -27,7 +29,7 @@ public interface ReviewRepository extends JpaRepository<Review, UUID> {
                    coalesce(sum(case when r.reordered = true then 1 else 0 end), 0) as repeatCount,
                    count(r.reordered) as repeatOrderResponses
             from Review r
-            where r.dishId = :dishId and r.visible = true
+            where r.dishId = :dishId and r.status = com.foodflow.feedback.ReviewStatus.VISIBLE
             """)
     ReviewAggregate summarize(@Param("dishId") UUID dishId);
 
@@ -38,7 +40,7 @@ public interface ReviewRepository extends JpaRepository<Review, UUID> {
                    coalesce(sum(case when r.reordered = true then 1 else 0 end), 0) as repeatCount,
                    count(r.reordered) as repeatOrderResponses
             from Review r
-            where r.dishId in :dishIds and r.visible = true
+            where r.dishId in :dishIds and r.status = com.foodflow.feedback.ReviewStatus.VISIBLE
             group by r.dishId
             """)
     List<DishReviewAggregate> summarizeForDishes(@Param("dishIds") List<UUID> dishIds);
